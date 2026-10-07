@@ -1,0 +1,13 @@
+# 依赖约束文件（通过 PIP_CONSTRAINT 环境变量生效）
+
+# 为什么需要它：
+# p4a(master) 在解析依赖时会用 --platform=android_24_arm64_v8a 选出「Android 专用 wheel」，
+# 并把它的下载直链写进依赖清单；但真正 pip install 时又没带 --platform，
+# 于是 pip 报 "xxx-android_24_arm64_v8a.whl is not a supported wheel on this platform" 中断构建。
+#
+# charset-normalizer 从 3.5.0 起才开始发布 Android 专用 wheel，
+# 钉到 3.3.2 后只有 py3-none-any 通用轮子，解析阶段就不会再选中 Android wheel。
+# 它只是 requests 的依赖，本 App 并未直接使用。
+#
+# 若将来换成别的包名报同样的错，把那个包也钉到它发布 Android wheel 之前的最后版本即可。
+charset-normalizer==3.3.2
