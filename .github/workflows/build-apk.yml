@@ -56,6 +56,10 @@ jobs:
             buildozer-${{ runner.os }}-
 
       - name: 8. 编译 debug 版 APK
+        # PIP_CONSTRAINT 用于约束 p4a 内部的依赖解析，避免它选中 Android 专用 wheel
+        # 后又在安装阶段被 pip 拒绝（详见 constraints.txt 与 README 的 FAQ Q8）
+        env:
+          PIP_CONSTRAINT: ${{ github.workspace }}/constraints.txt
         run: buildozer -v android debug
 
       - name: 9. 查看产物大小
