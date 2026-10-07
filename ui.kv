@@ -1,0 +1,494 @@
+#:import SlideTransition kivy.uix.screenmanager.SlideTransition
+
+# ======================================================================
+# 通用控件
+# ======================================================================
+
+<RoundButton@Button>:
+    font_name: app.font_name
+    font_size: sp(16)
+    size_hint_y: None
+    height: dp(48)
+    background_normal: ''
+    background_down: ''
+    background_color: 0, 0, 0, 0
+    color: (0.42, 0.47, 0.44, 1) if self.disabled else (1, 1, 1, 1)
+    canvas.before:
+        Color:
+            rgba: app.COLOR_DISABLED if self.disabled else (app.COLOR_PRIMARY_DARK if self.state == 'down' else app.COLOR_PRIMARY)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(12)]
+
+<TextLink@Button>:
+    font_name: app.font_name
+    font_size: sp(13)
+    size_hint_y: None
+    height: dp(36)
+    background_normal: ''
+    background_down: ''
+    background_color: 0, 0, 0, 0
+    color: app.COLOR_PRIMARY_DARK
+
+<FieldInput@TextInput>:
+    font_name: app.font_name
+    font_size: sp(15)
+    multiline: False
+    size_hint_y: None
+    height: dp(46)
+    background_normal: ''
+    background_active: ''
+    background_color: 0, 0, 0, 0
+    foreground_color: app.COLOR_TEXT
+    cursor_color: app.COLOR_PRIMARY
+    hint_text_color: 0.55, 0.64, 0.58, 1
+    padding: dp(14), dp(13), dp(14), dp(13)
+    canvas.before:
+        Color:
+            rgba: 1, 1, 1, 1
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(10)]
+        Color:
+            rgba: app.COLOR_PRIMARY if self.focus else app.COLOR_LINE
+        Line:
+            width: 1.2
+            rounded_rectangle: self.x, self.y, self.width, self.height, dp(10)
+
+<Card@BoxLayout>:
+    orientation: 'vertical'
+    padding: dp(16)
+    spacing: dp(10)
+    size_hint_y: None
+    height: self.minimum_height
+    canvas.before:
+        Color:
+            rgba: app.COLOR_CARD
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(16)]
+        Color:
+            rgba: app.COLOR_LINE
+        Line:
+            width: 1
+            rounded_rectangle: self.x, self.y, self.width, self.height, dp(16)
+
+<DeviceRow>:
+    font_name: app.font_name
+    font_size: sp(13)
+    size_hint_y: None
+    height: dp(58)
+    halign: 'left'
+    valign: 'middle'
+    text_size: self.size
+    padding: dp(14), dp(6)
+    background_normal: ''
+    background_down: ''
+    background_color: 0, 0, 0, 0
+    color: app.COLOR_TEXT
+    canvas.before:
+        Color:
+            rgba: (0.898, 0.973, 0.918, 1) if self.state == 'down' else (1, 1, 1, 1)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(10)]
+        Color:
+            rgba: app.COLOR_LINE
+        Line:
+            width: 1
+            rounded_rectangle: self.x, self.y, self.width, self.height, dp(10)
+
+# ======================================================================
+# 根容器
+# ======================================================================
+
+<RootWidget>:
+    transition: SlideTransition()
+    LoginScreen:
+        name: 'login'
+    RegisterScreen:
+        name: 'register'
+    MainScreen:
+        name: 'main'
+
+# ======================================================================
+# 登录页
+# ======================================================================
+
+<LoginScreen>:
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(22), dp(8)
+        canvas.before:
+            Color:
+                rgba: app.COLOR_BG
+            Rectangle:
+                pos: self.pos
+                size: self.size
+
+        Widget:
+            size_hint_y: 0.4
+
+        Label:
+            text: '绿联蓝牙助手'
+            font_name: app.font_name
+            font_size: sp(27)
+            bold: True
+            color: app.COLOR_PRIMARY_DARK
+            size_hint_y: None
+            height: dp(42)
+
+        Label:
+            text: '医疗设备蓝牙连接平台'
+            font_name: app.font_name
+            font_size: sp(13)
+            color: app.COLOR_TEXT_WEAK
+            size_hint_y: None
+            height: dp(22)
+
+        Widget:
+            size_hint_y: None
+            height: dp(20)
+
+        Card:
+            size_hint_x: 1
+            Label:
+                text: '账号登录'
+                font_name: app.font_name
+                font_size: sp(17)
+                bold: True
+                color: app.COLOR_TEXT
+                halign: 'left'
+                text_size: self.size
+                size_hint_y: None
+                height: dp(28)
+            FieldInput:
+                id: username
+                hint_text: '请输入用户名'
+                on_text: root.message = ''
+            FieldInput:
+                id: password
+                hint_text: '请输入密码'
+                password: True
+                on_text: root.message = ''
+            Label:
+                text: root.message
+                font_name: app.font_name
+                font_size: sp(12)
+                color: app.COLOR_PRIMARY_DARK if root.message_ok else app.COLOR_DANGER
+                halign: 'left'
+                text_size: self.size
+                size_hint_y: None
+                height: dp(22) if root.message else 0
+            RoundButton:
+                text: '登 录'
+                on_release: root.do_login()
+            TextLink:
+                text: '还没有账号？点此注册'
+                on_release: root.goto_register()
+
+        Widget:
+            size_hint_y: 0.5
+
+# ======================================================================
+# 注册页
+# ======================================================================
+
+<RegisterScreen>:
+    BoxLayout:
+        orientation: 'vertical'
+        padding: dp(22), dp(8)
+        canvas.before:
+            Color:
+                rgba: app.COLOR_BG
+            Rectangle:
+                pos: self.pos
+                size: self.size
+
+        Widget:
+            size_hint_y: 0.25
+
+        Label:
+            text: '注册新账号'
+            font_name: app.font_name
+            font_size: sp(23)
+            bold: True
+            color: app.COLOR_PRIMARY_DARK
+            size_hint_y: None
+            height: dp(38)
+
+        Label:
+            text: '账号仅保存在本机，暂不提供密码找回'
+            font_name: app.font_name
+            font_size: sp(12)
+            color: app.COLOR_TEXT_WEAK
+            size_hint_y: None
+            height: dp(20)
+
+        Widget:
+            size_hint_y: None
+            height: dp(18)
+
+        Card:
+            size_hint_x: 1
+            FieldInput:
+                id: username
+                hint_text: '设置用户名（3-20 个字符）'
+                on_text: root.message = ''
+            FieldInput:
+                id: password
+                hint_text: '设置密码（至少 6 位）'
+                password: True
+                on_text: root.message = ''
+            FieldInput:
+                id: confirm
+                hint_text: '请再次输入密码'
+                password: True
+                on_text: root.message = ''
+            Label:
+                text: root.message
+                font_name: app.font_name
+                font_size: sp(12)
+                color: app.COLOR_PRIMARY_DARK if root.message_ok else app.COLOR_DANGER
+                halign: 'left'
+                text_size: self.size
+                size_hint_y: None
+                height: dp(22) if root.message else 0
+            RoundButton:
+                text: '注 册'
+                on_release: root.do_register()
+            TextLink:
+                text: '返回登录'
+                on_release: root.back_to_login()
+
+        Widget:
+            size_hint_y: 0.4
+
+# ======================================================================
+# 蓝牙功能页
+# ======================================================================
+
+<MainScreen>:
+    BoxLayout:
+        orientation: 'vertical'
+        canvas.before:
+            Color:
+                rgba: app.COLOR_BG
+            Rectangle:
+                pos: self.pos
+                size: self.size
+
+        # ---------- 顶部标题栏 ----------
+        BoxLayout:
+            orientation: 'horizontal'
+            size_hint_y: None
+            height: dp(60)
+            padding: dp(18), dp(8)
+            canvas.before:
+                Color:
+                    rgba: app.COLOR_PRIMARY
+                Rectangle:
+                    pos: self.pos
+                    size: self.size
+            BoxLayout:
+                orientation: 'vertical'
+                Label:
+                    text: '绿联蓝牙助手'
+                    font_name: app.font_name
+                    font_size: sp(17)
+                    bold: True
+                    color: 1, 1, 1, 1
+                    halign: 'left'
+                    valign: 'middle'
+                    text_size: self.size
+                Label:
+                    text: root.user_text
+                    font_name: app.font_name
+                    font_size: sp(11)
+                    color: 0.85, 0.97, 0.89, 1
+                    halign: 'left'
+                    valign: 'middle'
+                    text_size: self.size
+            Button:
+                text: '退出'
+                font_name: app.font_name
+                font_size: sp(13)
+                size_hint_x: None
+                width: dp(64)
+                background_normal: ''
+                background_down: ''
+                background_color: 0, 0, 0, 0
+                color: 1, 1, 1, 1
+                on_release: root.logout()
+
+        # ---------- 连接状态区 ----------
+        BoxLayout:
+            orientation: 'vertical'
+            padding: dp(18), dp(16), dp(18), dp(10)
+            spacing: dp(10)
+            size_hint_y: None
+            height: self.minimum_height
+
+            Card:
+                BoxLayout:
+                    orientation: 'horizontal'
+                    spacing: dp(12)
+                    size_hint_y: None
+                    height: dp(54)
+                    Widget:
+                        size_hint_x: None
+                        width: dp(16)
+                        canvas:
+                            Color:
+                                rgba: app.COLOR_PRIMARY if root.connected else app.COLOR_TEXT_WEAK
+                            Ellipse:
+                                pos: self.center_x - dp(7), self.center_y - dp(7)
+                                size: dp(14), dp(14)
+                    BoxLayout:
+                        orientation: 'vertical'
+                        Label:
+                            text: root.status_text
+                            font_name: app.font_name
+                            font_size: sp(16)
+                            bold: True
+                            color: app.COLOR_TEXT
+                            halign: 'left'
+                            valign: 'middle'
+                            text_size: self.size
+                        Label:
+                            text: root.status_detail
+                            font_name: app.font_name
+                            font_size: sp(11)
+                            color: app.COLOR_TEXT_WEAK
+                            halign: 'left'
+                            valign: 'middle'
+                            text_size: self.size
+
+            BoxLayout:
+                orientation: 'horizontal'
+                spacing: dp(10)
+                size_hint_y: None
+                height: dp(48)
+                RoundButton:
+                    text: '蓝牙连接'
+                    on_release: root.open_device_dialog()
+                RoundButton:
+                    text: '断开连接'
+                    disabled: not root.connected
+                    on_release: root.do_disconnect()
+
+            Label:
+                text: '设备功能（连接成功后可用）'
+                font_name: app.font_name
+                font_size: sp(12)
+                color: app.COLOR_TEXT_WEAK
+                halign: 'left'
+                text_size: self.size
+                size_hint_y: None
+                height: dp(20)
+
+        # ---------- 8 个预留功能按钮 ----------
+        GridLayout:
+            id: func_grid
+            cols: 2
+            spacing: dp(10)
+            padding: dp(18), dp(6), dp(18), dp(14)
+            size_hint_y: None
+            height: dp(4 * 48 + 3 * 10 + 20)
+            RoundButton:
+                text: '功能一'
+                disabled: not root.connected
+                on_release: root.reserved('功能一')
+            RoundButton:
+                text: '功能二'
+                disabled: not root.connected
+                on_release: root.reserved('功能二')
+            RoundButton:
+                text: '功能三'
+                disabled: not root.connected
+                on_release: root.reserved('功能三')
+            RoundButton:
+                text: '功能四'
+                disabled: not root.connected
+                on_release: root.reserved('功能四')
+            RoundButton:
+                text: '功能五'
+                disabled: not root.connected
+                on_release: root.reserved('功能五')
+            RoundButton:
+                text: '功能六'
+                disabled: not root.connected
+                on_release: root.reserved('功能六')
+            RoundButton:
+                text: '功能七'
+                disabled: not root.connected
+                on_release: root.reserved('功能七')
+            RoundButton:
+                text: '功能八'
+                disabled: not root.connected
+                on_release: root.reserved('功能八')
+
+# ======================================================================
+# 弹窗
+# ======================================================================
+
+<InfoPopup>:
+    title_font: app.font_name
+    title_size: sp(16)
+    title_color: app.COLOR_PRIMARY_DARK
+    separator_color: app.COLOR_LINE
+    size_hint: 0.86, None
+    height: dp(200)
+    BoxLayout:
+        orientation: 'vertical'
+        spacing: dp(12)
+        padding: dp(4)
+        Label:
+            text: root.message
+            font_name: app.font_name
+            font_size: sp(14)
+            color: app.COLOR_TEXT
+            halign: 'center'
+            valign: 'middle'
+            text_size: self.size
+        RoundButton:
+            text: '知道了'
+            on_release: root.dismiss()
+
+<DevicePopup>:
+    title: '选择附近的 BLE 设备'
+    title_font: app.font_name
+    title_size: sp(16)
+    title_color: app.COLOR_PRIMARY_DARK
+    separator_color: app.COLOR_LINE
+    size_hint: 0.92, 0.75
+    BoxLayout:
+        orientation: 'vertical'
+        spacing: dp(10)
+        padding: dp(4)
+        Label:
+            id: popup_status
+            text: '正在搜索…'
+            font_name: app.font_name
+            font_size: sp(12)
+            color: app.COLOR_TEXT_WEAK
+            halign: 'left'
+            text_size: self.size
+            size_hint_y: None
+            height: dp(22)
+        ScrollView:
+            do_scroll_x: False
+            bar_width: dp(3)
+            GridLayout:
+                id: device_list
+                cols: 1
+                spacing: dp(8)
+                size_hint_y: None
+                height: self.minimum_height
+        RoundButton:
+            text: '停止搜索并关闭'
+            on_release: root.dismiss()

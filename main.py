@@ -1,0 +1,331 @@
+# -*- coding: utf-8 -*-
+"""绿联蓝牙助手 —— 医疗设备 BLE 连接演示 App。
+
+界面结构：
+    登录页  ->  注册页（注册成功回到登录页）
+            ->  蓝牙功能页（登录成功后进入）
+
+蓝牙功能页：点击「蓝牙连接」搜索附近 BLE 设备并选择连接，
+连接成功后解锁 8 个预留功能按钮。
+"""
+
+import os
+
+from kivy.app import App
+from kivy.clock import Clock
+from kivy.core.text import LabelBase
+from kivy.core.window import Window
+from kivy.lang import Builder
+from kivy.logger import Logger
+from kivy.properties import BooleanProperty, ListProperty, StringProperty
+from kivy.uix.button import Button
+from kivy.uix.popup import Popup
+from kivy.uix.screenmanager import Screen, ScreenManager
+from kivy.utils import platform
+
+from accounts import AccountStore
+
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+KV_FILE = os.path.join(APP_DIR, 'ui.kv')
+FONT_FILE = os.path.join(APP_DIR, 'assets', 'fonts', 'NotoSansSC-Regular.ttf')
+
+# 系统中文字体兜底路径（未打包字体文件时使用）
+SYSTEM_FONTS = [
+    '/system/fonts/NotoSansCJK-Regular.ttc',
+    '/system/fonts/NotoSansSC-Regular.otf',
+    '/system/fonts/DroidSansFallbackFull.ttf',
+    '/system/fonts/DroidSansFallback.ttf',
+]
+
+
+# ----------------------------------------------------------------------
+# 主题色：医疗场景的活力绿
+# ----------------------------------------------------------------------
+COLOR_PRIMARY = [0.000, 0.784, 0.325, 1.0]       # #00C853
+COLOR_PRIMARY_DARK = [0.000, 0.545, 0.239, 1.0]  # #008B3D
+COLOR_BG = [0.953, 0.988, 0.965, 1.0]            # #F3FCF6
+COLOR_CARD = [1.000, 1.000, 1.000, 1.0]
+COLOR_LINE = [0.831, 0.902, 0.855, 1.0]          # #D4E6DA
+COLOR_TEXT = [0.075, 0.196, 0.118, 1.0]
+COLOR_TEXT_WEAK = [0.427, 0.522, 0.455, 1.0]
+COLOR_DANGER = [0.855, 0.208, 0.271, 1.0]
+COLOR_DISABLED = [0.776, 0.839, 0.796, 1.0]
+
+
+def register_cjk_font():
+    """注册中文字体，避免中文显示成方框。"""
+    for path in [FONT_FILE] + SYSTEM_FONTS:
+        if os.path.exists(path):
+            try:
+                LabelBase.register(name='CJK', fn_regular=path)
+                return 'CJK'
+            except Exception:
+                Logger.exception('BleAssistant: 字体注册失败 %s', path)
+    return 'Roboto'
+
+
+def create_ble_manager():
+    """按运行平台选择 BLE 实现。"""
+    if platform == 'android':
+        from ble_android import AndroidBleManager
+        return AndroidBleManager()
+    from ble_sim import SimulatedBleManager
+    return SimulatedBleManager()
+
+
+# ----------------------------------------------------------------------
+# 控件
+# ----------------------------------------------------------------------
+class DeviceRow(Button):
+    """设备列表中的一行。"""
+
+
+class RootWidget(ScreenManager):
+    """承载三个页面。"""
+
+
+def show_info(title, message):
+    popup = InfoPopup(title=title, message=message)
+    popup.open()
+    return popup
+
+
+class InfoPopup(Popup):
+    message = StringProperty('')
+
+
+class DevicePopup(Popup):
+    """搜索并选择附近 BLE 设备的弹窗。"""
+
+    def __init__(self, ble, on_pick, **kwargs):
+        super(DevicePopup, self).__init__(**kwargs)
+        self._ble = ble
+        self._on_pick = on_pick
+        self._poll = None
+        self._known = None
+
+    def on_open(self, *args):
+        super(DevicePopup, self).on_open(*args)
+        self._known = None
+        self._ble.start_scan()
+        self._poll = Clock.schedule_interval(self._refresh, 0.6)
+        self._refresh(0)
+
+    def on_dismiss(self, *args):
+        super(DevicePopup, self).on_dismiss(*args)
+        if self._poll is not None:
+            self._poll.cancel()
+            self._poll = None
+        self._ble.stop_scan()
+
+    def _refresh(self, dt):
+        title, detail, _connected = self._ble.status()
+        self.ids.popup_status.text = '%s · %s' % (title, detail.split('\n')[0])
+
+        devices = self._ble.devices()
+        signature = tuple(device['address'] for device in devices)
+        if signature == self._known:
+            return
+        self._known = signature
+
+        box = self.ids.device_list
+        box.clear_widgets()
+        if not devices:
+            box.add_widget(DeviceRow(text='正在搜索附近的 BLE 设备…',
+                                     disabled=True))
+            return
+        for device in devices:
+            row = DeviceRow()
+            row.text = '%s\n%s   信号 %d dBm' % (device['name'],
+                                                device['address'],
+                                                device['rssi'])
+            row.bind(on_release=lambda widget, dev=device: self._pick(dev))
+            box.add_widget(row)
+
+    def _pick(self, device):
+        self.dismiss()
+        self._on_pick(device)
+
+
+# ----------------------------------------------------------------------
+# 页面
+# ----------------------------------------------------------------------
+class LoginScreen(Screen):
+    message = StringProperty('')
+    message_ok = BooleanProperty(False)
+
+    def reset(self):
+        self.ids.username.text = ''
+        self.ids.password.text = ''
+        self.message = ''
+        self.message_ok = False
+
+    def prepare(self, username, hint):
+        """注册成功后回到登录页时调用。"""
+        self.ids.username.text = username
+        self.ids.password.text = ''
+        self.message = hint
+        self.message_ok = True
+
+    def do_login(self):
+        app = App.get_running_app()
+        username = self.ids.username.text
+        ok, msg = app.store.verify(username, self.ids.password.text)
+        self.message = msg
+        self.message_ok = ok
+        if not ok:
+            return
+        self.ids.password.text = ''
+        app.current_user = username.strip()
+        app.root.current = 'main'
+
+    def goto_register(self):
+        self.message = ''
+        self.message_ok = False
+        self.manager.current = 'register'
+
+
+class RegisterScreen(Screen):
+    message = StringProperty('')
+    message_ok = BooleanProperty(False)
+
+    def reset(self):
+        self.ids.username.text = ''
+        self.ids.password.text = ''
+        self.ids.confirm.text = ''
+        self.message = ''
+        self.message_ok = False
+
+    def do_register(self):
+        app = App.get_running_app()
+        username = self.ids.username.text.strip()
+        ok, msg = app.store.register(self.ids.username.text,
+                                     self.ids.password.text,
+                                     self.ids.confirm.text)
+        self.message = msg
+        self.message_ok = ok
+        if not ok:
+            return
+        app.root.get_screen('login').prepare(username, msg)
+        self.reset()
+        app.root.current = 'login'
+
+    def back_to_login(self):
+        self.reset()
+        self.manager.current = 'login'
+
+
+class MainScreen(Screen):
+    status_text = StringProperty('未连接')
+    status_detail = StringProperty('点击下方「蓝牙连接」搜索附近的 BLE 设备')
+    connected = BooleanProperty(False)
+    user_text = StringProperty('')
+
+    def __init__(self, **kwargs):
+        super(MainScreen, self).__init__(**kwargs)
+        self._poll = None
+
+    def on_enter(self, *args):
+        app = App.get_running_app()
+        self.user_text = '当前用户：%s' % (app.current_user or '-')
+        self._refresh(0)
+        if self._poll is None:
+            self._poll = Clock.schedule_interval(self._refresh, 0.4)
+
+    def on_leave(self, *args):
+        if self._poll is not None:
+            self._poll.cancel()
+            self._poll = None
+
+    def _refresh(self, dt):
+        ble = App.get_running_app().ble
+        title, detail, connected = ble.status()
+        if title != self.status_text:
+            self.status_text = title
+        if detail != self.status_detail:
+            self.status_detail = detail
+        if connected != self.connected:
+            self.connected = connected
+
+    def open_device_dialog(self):
+        if self.connected:
+            show_info('已连接', '当前已连接设备，如需更换请先点击「断开连接」。')
+            return
+        ble = App.get_running_app().ble
+        DevicePopup(ble=ble, on_pick=self._on_device_picked).open()
+
+    def _on_device_picked(self, device):
+        App.get_running_app().ble.connect(device['address'])
+
+    def do_disconnect(self):
+        App.get_running_app().ble.disconnect()
+
+    def reserved(self, name):
+        show_info('功能预留', '「%s」为预留功能，后续可在此接入具体医疗设备指令。' % name)
+
+    def logout(self):
+        App.get_running_app().logout()
+
+
+# ----------------------------------------------------------------------
+# App
+# ----------------------------------------------------------------------
+class BleAssistantApp(App):
+    title = '绿联蓝牙助手'
+
+    font_name = StringProperty('Roboto')
+    current_user = StringProperty('')
+
+    COLOR_PRIMARY = ListProperty(COLOR_PRIMARY)
+    COLOR_PRIMARY_DARK = ListProperty(COLOR_PRIMARY_DARK)
+    COLOR_BG = ListProperty(COLOR_BG)
+    COLOR_CARD = ListProperty(COLOR_CARD)
+    COLOR_LINE = ListProperty(COLOR_LINE)
+    COLOR_TEXT = ListProperty(COLOR_TEXT)
+    COLOR_TEXT_WEAK = ListProperty(COLOR_TEXT_WEAK)
+    COLOR_DANGER = ListProperty(COLOR_DANGER)
+    COLOR_DISABLED = ListProperty(COLOR_DISABLED)
+
+    def build(self):
+        self.font_name = register_cjk_font()
+        self.ble = create_ble_manager()
+        self.store = AccountStore(os.path.join(self.user_data_dir, 'accounts.db'))
+
+        Window.bind(on_keyboard=self._on_keyboard)
+        Builder.load_file(KV_FILE)
+        return RootWidget()
+
+    # ------------------------------------------------------------------
+    # 全局
+    # ------------------------------------------------------------------
+    def logout(self):
+        try:
+            self.ble.disconnect()
+        except Exception:
+            Logger.exception('BleAssistant: 退出登录时断开连接失败')
+        self.current_user = ''
+        self.root.get_screen('login').reset()
+        self.root.current = 'login'
+
+    def _on_keyboard(self, window, key, scancode, codepoint, modifiers):
+        # Android 返回键（27）与桌面 ESC 一致
+        if key == 27:
+            current = self.root.current
+            if current == 'register':
+                self.root.get_screen('register').back_to_login()
+                return True
+            if current == 'main':
+                # 主界面拦截返回键，避免误退出应用
+                return True
+        return False
+
+    def on_pause(self):
+        try:
+            self.ble.stop_scan()
+        except Exception:
+            pass
+        return True
+
+
+if __name__ == '__main__':
+    BleAssistantApp().run()
