@@ -15,7 +15,7 @@ source.exclude_dirs = build, dist, bin, .git, .github, .buildozer, __pycache__
 version = 1.0.0
 
 # Android BLE 扫描/连接需要 pyjnius 调用原生 API，android 模块用于申请运行时权限
-requirements = python3,kivy,pyjnius,android
+requirements = python3,kivy,pyjnius,android,charset-normalizer==3.3.2
 
 orientation = portrait
 fullscreen = 0
