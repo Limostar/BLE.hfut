@@ -30,7 +30,7 @@ android.permissions = BLUETOOTH,BLUETOOTH_ADMIN,BLUETOOTH_SCAN,BLUETOOTH_CONNECT
 
 # BLUETOOTH_SCAN 要求 API >= 31，这里用 33
 android.api = 33
-android.minapi = 23
+android.minapi = 24
 android.ndk = 25b
 
 # 只编译 64 位架构，构建更快、APK 更小；
