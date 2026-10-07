@@ -4,6 +4,8 @@ import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
+import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
 import android.bluetooth.le.BluetoothLeScanner;
@@ -16,9 +18,12 @@ import android.location.LocationManager;
 import android.os.Build;
 import android.util.Log;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 
 /**
  * BLE bridge between Python and the Android Bluetooth stack.
@@ -280,6 +285,16 @@ public final class BleHelper {
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 connState = CONN_DISCONNECTED;
                 serviceCount = 0;
+                // Drop pending commands: otherwise stale commands would be
+                // flushed to the device after the next reconnect.
+                synchronized (WRITE_LOCK) {
+                    WRITE_QUEUE.clear();
+                    writing = false;
+                }
+                if (writeState == WRITE_SENDING) {
+                    writeState = WRITE_FAILED;
+                    writeMessage = "connection lost before the write completed";
+                }
             }
         }
 
@@ -291,6 +306,24 @@ public final class BleHelper {
                 } catch (Throwable ignored) {
                 }
             }
+        }
+
+        @Override
+        public void onCharacteristicWrite(BluetoothGatt g, BluetoothGattCharacteristic c, int status) {
+            writeStatus = status;
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                writeState = WRITE_SUCCESS;
+                writeMessage = "wrote " + lastWriteLength + " byte(s) successfully";
+            } else {
+                writeState = WRITE_FAILED;
+                writeMessage = "GATT write failed, status=" + status;
+            }
+            synchronized (WRITE_LOCK) {
+                writing = false;
+            }
+            // One GATT operation at a time: send the next one only after
+            // this one reported back.
+            pumpWrites();
         }
     };
 
@@ -331,6 +364,282 @@ public final class BleHelper {
         gatt = null;
         connState = CONN_DISCONNECTED;
         serviceCount = 0;
+        resetWrites();
+    }
+
+    // ------------------------------------------------------------------
+    // GATT write (command downlink)
+    //
+    // Android's GATT layer allows only ONE outstanding operation at a time,
+    // so writes are queued here and the next command is pumped out from
+    // onCharacteristicWrite(). This is also the reason all of this has to
+    // live in Java: PyJNIus cannot subclass the abstract BluetoothGattCallback.
+    // ------------------------------------------------------------------
+    public static final int WRITE_IDLE = 0;
+    public static final int WRITE_SENDING = 1;
+    public static final int WRITE_SUCCESS = 2;
+    public static final int WRITE_FAILED = 3;
+
+    /** Payload limit for a single write without MTU negotiation: MTU 23 - 3. */
+    public static final int DEFAULT_MAX_PAYLOAD = 20;
+    private static final int MAX_PENDING_WRITES = 8;
+
+    private static final Object WRITE_LOCK = new Object();
+    private static final Queue<WriteRequest> WRITE_QUEUE = new LinkedList<WriteRequest>();
+
+    private static volatile int writeState = WRITE_IDLE;
+    private static volatile int writeStatus = 0;
+    private static volatile int lastWriteLength = 0;
+    private static volatile String writeMessage = "";
+    private static volatile String lastWriteTarget = "";
+    private static boolean writing = false;
+
+    private static final class WriteRequest {
+        final BluetoothGattCharacteristic characteristic;
+        final byte[] data;
+
+        WriteRequest(BluetoothGattCharacteristic characteristic, byte[] data) {
+            this.characteristic = characteristic;
+            this.data = data;
+        }
+    }
+
+    /**
+     * Queues a command. The payload is passed as a hex string (e.g. "AA55010001")
+     * because it marshals reliably through PyJNIus, unlike a raw byte[].
+     *
+     * @param autoPick when the configured UUID is not found (or empty), fall back to
+     *                 the first writable characteristic of the device. Handy during
+     *                 bring-up; the UUID that was actually used is reported back via
+     *                 getLastWriteTarget().
+     * @return an empty string when the command was accepted, otherwise the reason.
+     */
+    public static String writeCommand(String serviceUuid, String charUuid, String hexData,
+                                      boolean autoPick) {
+        byte[] data = hexToBytes(hexData);
+        if (data == null || data.length == 0) {
+            return "command payload is empty or not valid hex";
+        }
+        if (data.length > DEFAULT_MAX_PAYLOAD) {
+            return "command is " + data.length + " bytes, over the " + DEFAULT_MAX_PAYLOAD
+                    + "-byte limit of a single write (MTU negotiation is not implemented yet)";
+        }
+        if (gatt == null || connState != CONN_CONNECTED) {
+            return "device is not connected";
+        }
+        BluetoothGattCharacteristic characteristic = findCharacteristic(serviceUuid, charUuid);
+        if (characteristic == null && autoPick) {
+            characteristic = findFirstWritable();
+        }
+        if (characteristic == null) {
+            return "characteristic not found - check the UUID (use the services list)";
+        }
+        if (!isWritable(characteristic)) {
+            return "characteristic is not writable, properties=" + propertiesText(characteristic);
+        }
+        lastWriteTarget = characteristic.getUuid().toString();
+        synchronized (WRITE_LOCK) {
+            if (WRITE_QUEUE.size() >= MAX_PENDING_WRITES) {
+                return "too many pending commands, please retry";
+            }
+            WRITE_QUEUE.add(new WriteRequest(characteristic, data));
+        }
+        pumpWrites();
+        return "";
+    }
+
+    /** UUID that the most recent accepted command was sent to. */
+    public static String getLastWriteTarget() {
+        return lastWriteTarget == null ? "" : lastWriteTarget;
+    }
+
+    public static int getWriteState() {
+        return writeState;
+    }
+
+    public static int getWriteStatus() {
+        return writeStatus;
+    }
+
+    public static String getWriteMessage() {
+        return writeMessage == null ? "" : writeMessage;
+    }
+
+    /** Clears the queue and the last result (used after a client-side timeout). */
+    public static void resetWrites() {
+        synchronized (WRITE_LOCK) {
+            WRITE_QUEUE.clear();
+            writing = false;
+        }
+        writeState = WRITE_IDLE;
+        writeStatus = 0;
+        writeMessage = "";
+    }
+
+    private static void pumpWrites() {
+        final WriteRequest request;
+        synchronized (WRITE_LOCK) {
+            if (writing) {
+                return;
+            }
+            request = WRITE_QUEUE.poll();
+            if (request == null) {
+                if (writeState == WRITE_SENDING) {
+                    writeState = WRITE_IDLE;
+                }
+                return;
+            }
+            writing = true;
+        }
+
+        BluetoothGatt g = gatt;
+        boolean started = false;
+        String failure = "";
+        if (g == null) {
+            failure = "device is not connected";
+        } else {
+            try {
+                request.characteristic.setWriteType(
+                        BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+                request.characteristic.setValue(request.data);
+                started = g.writeCharacteristic(request.characteristic);
+                if (!started) {
+                    failure = "writeCharacteristic() was rejected by the system";
+                }
+            } catch (Throwable t) {
+                failure = "write threw: " + t;
+            }
+        }
+
+        lastWriteLength = request.data.length;
+        if (!started) {
+            synchronized (WRITE_LOCK) {
+                writing = false;
+            }
+            writeState = WRITE_FAILED;
+            writeMessage = failure;
+            pumpWrites();
+            return;
+        }
+        writeState = WRITE_SENDING;
+        writeStatus = 0;
+        writeMessage = "";
+    }
+
+    private static BluetoothGattCharacteristic findCharacteristic(String serviceUuid, String charUuid) {
+        BluetoothGatt g = gatt;
+        if (g == null || charUuid == null || charUuid.isEmpty()) {
+            return null;
+        }
+        try {
+            for (BluetoothGattService service : g.getServices()) {
+                if (serviceUuid != null && !serviceUuid.isEmpty()
+                        && !service.getUuid().toString().equalsIgnoreCase(serviceUuid)) {
+                    continue;
+                }
+                for (BluetoothGattCharacteristic c : service.getCharacteristics()) {
+                    if (c.getUuid().toString().equalsIgnoreCase(charUuid)) {
+                        return c;
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "findCharacteristic: " + t);
+        }
+        return null;
+    }
+
+    /** First writable characteristic found on the device (bring-up fallback). */
+    private static BluetoothGattCharacteristic findFirstWritable() {
+        BluetoothGatt g = gatt;
+        if (g == null) {
+            return null;
+        }
+        try {
+            for (BluetoothGattService service : g.getServices()) {
+                for (BluetoothGattCharacteristic c : service.getCharacteristics()) {
+                    if (isWritable(c)) {
+                        return c;
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "findFirstWritable: " + t);
+        }
+        return null;
+    }
+
+    private static boolean isWritable(BluetoothGattCharacteristic c) {
+        int properties = c.getProperties();
+        return (properties & BluetoothGattCharacteristic.PROPERTY_WRITE) != 0
+                || (properties & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0;
+    }
+
+    private static String propertiesText(BluetoothGattCharacteristic c) {
+        int properties = c.getProperties();
+        StringBuilder text = new StringBuilder();
+        if ((properties & BluetoothGattCharacteristic.PROPERTY_READ) != 0) {
+            text.append("READ ");
+        }
+        if ((properties & BluetoothGattCharacteristic.PROPERTY_WRITE) != 0) {
+            text.append("WRITE ");
+        }
+        if ((properties & BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0) {
+            text.append("WRITE_NO_RESPONSE ");
+        }
+        if ((properties & BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0) {
+            text.append("NOTIFY ");
+        }
+        if ((properties & BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0) {
+            text.append("INDICATE ");
+        }
+        String result = text.toString().trim();
+        return result.isEmpty() ? "NONE" : result;
+    }
+
+    /**
+     * Lists the discovered GATT tree as "serviceUuid|characteristicUuid|properties".
+     * Service-only rows have an empty middle field. Lets the user find the right
+     * UUIDs from the phone without a BLE debugging tool.
+     */
+    public static String[] getServicesInfo() {
+        BluetoothGatt g = gatt;
+        if (g == null) {
+            return new String[0];
+        }
+        List<String> rows = new ArrayList<String>();
+        try {
+            for (BluetoothGattService service : g.getServices()) {
+                String serviceUuid = service.getUuid().toString();
+                rows.add(serviceUuid + "||service");
+                for (BluetoothGattCharacteristic c : service.getCharacteristics()) {
+                    rows.add(serviceUuid + "|" + c.getUuid().toString() + "|"
+                            + propertiesText(c));
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "getServicesInfo: " + t);
+        }
+        return rows.toArray(new String[0]);
+    }
+
+    private static byte[] hexToBytes(String hex) {
+        if (hex == null) {
+            return null;
+        }
+        String cleaned = hex.replace(" ", "").replace(":", "").replace("-", "").trim();
+        if (cleaned.isEmpty() || (cleaned.length() % 2) != 0) {
+            return null;
+        }
+        byte[] out = new byte[cleaned.length() / 2];
+        try {
+            for (int i = 0; i < out.length; i++) {
+                out[i] = (byte) Integer.parseInt(cleaned.substring(i * 2, i * 2 + 2), 16);
+            }
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        return out;
     }
 
     public static int getConnState() {

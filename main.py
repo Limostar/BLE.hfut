@@ -17,8 +17,10 @@ from kivy.core.text import LabelBase
 from kivy.core.window import Window
 from kivy.lang import Builder
 from kivy.logger import Logger
+from kivy.metrics import dp
 from kivy.properties import BooleanProperty, ListProperty, StringProperty
 from kivy.uix.button import Button
+from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen, ScreenManager
 from kivy.utils import platform
@@ -51,6 +53,52 @@ COLOR_TEXT_WEAK = [0.427, 0.522, 0.455, 1.0]
 COLOR_DANGER = [0.855, 0.208, 0.271, 1.0]
 COLOR_DISABLED = [0.776, 0.839, 0.796, 1.0]
 
+# ======================================================================
+# ESP32 通信配置 —— 只改这一段就能适配你的固件
+# ======================================================================
+# 写入特征的 UUID。
+# 服务 UUID 留空表示"在所有服务里查找这个特征"，多数情况下更省事。
+# 不确定 UUID 时：先连接设备，再点界面上的「服务/特征」按钮，
+# 手机上会列出该设备暴露的全部服务与特征及其属性，
+# 找到属性里带 WRITE 的那一条，把它的 UUID 填到下面即可。
+ESP32_WRITE_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'   # 默认示例：Nordic UART 的 RX 特征
+ESP32_SERVICE_UUID = ''
+
+# 调试开关：按上面的 UUID 找不到特征时，自动改用"设备上第一个可写特征"，
+# 这样第一次构建就能先跑通链路；弹窗里会显示它实际写到了哪个特征。
+# 正式使用时建议把这个改成 False，只允许写约定的那一个特征。
+ESP32_AUTO_PICK_WRITE = True
+
+# 各功能按钮对应的命令字（与 ESP32 固件约定）
+CMD_FUNC_1 = 0x01
+
+# 命令帧格式：[0xAA][0x55][命令字][数据长度][数据...][异或校验]
+# 如果你们固件用的是别的格式，只需要改 build_frame() 这一个函数。
+FRAME_HEADER = (0xAA, 0x55)
+
+# 单次写入的载荷上限：默认 MTU=23，减去 3 字节 ATT 头，即 20 字节。
+# 超过这个长度需要先协商 MTU 并分片，当前版本会明确提示而不是静默失败。
+MAX_PAYLOAD = 20
+
+# 写入结果等待超时（秒）
+WRITE_TIMEOUT = 3.0
+
+WRITE_IDLE, WRITE_SENDING, WRITE_SUCCESS, WRITE_FAILED = 0, 1, 2, 3
+
+
+def build_frame(cmd, data=b''):
+    """按默认帧格式拼一条命令。要换格式就改这个函数。"""
+    payload = bytes(bytearray(data))
+    body = bytes(bytearray([cmd, len(payload)])) + payload
+    checksum = 0
+    for value in bytearray(body):
+        checksum ^= value
+    return bytes(bytearray(FRAME_HEADER)) + body + bytes(bytearray([checksum]))
+
+
+def to_hex(data):
+    return ''.join('%02X' % value for value in bytearray(data))
+
 
 def register_cjk_font():
     """注册中文字体，避免中文显示成方框。"""
@@ -78,6 +126,10 @@ def create_ble_manager():
 # ----------------------------------------------------------------------
 class DeviceRow(Button):
     """设备列表中的一行。"""
+
+
+class ServiceRow(Label):
+    """服务 / 特征列表中的一行。"""
 
 
 class RootWidget(ScreenManager):
@@ -151,6 +203,89 @@ class DevicePopup(Popup):
         """重新发起一次扫描（授权后、或长时间搜不到时用）。"""
         self._known = None
         self._ble.start_scan()
+
+
+class CommandPopup(Popup):
+    """命令下发的结果反馈：入队 → 发送中 → 成功 / 失败 / 超时。"""
+
+    command_name = StringProperty('')
+    frame_hex = StringProperty('')
+    target_text = StringProperty('')
+    result_text = StringProperty('')
+
+    def __init__(self, ble, accepted, message, **kwargs):
+        super(CommandPopup, self).__init__(**kwargs)
+        self._ble = ble
+        self._accepted = accepted
+        self._message = message
+        self._poll = None
+        self._elapsed = 0.0
+        if not accepted:
+            self.result_text = '下发失败：%s' % message
+
+    def on_open(self, *args):
+        super(CommandPopup, self).on_open(*args)
+        if not self._accepted:
+            return
+        self.result_text = '发送中…'
+        self._poll = Clock.schedule_interval(self._refresh, 0.3)
+
+    def on_dismiss(self, *args):
+        super(CommandPopup, self).on_dismiss(*args)
+        self._stop_poll()
+
+    def _stop_poll(self):
+        if self._poll is not None:
+            self._poll.cancel()
+            self._poll = None
+
+    def _refresh(self, dt):
+        self._elapsed += dt
+        target = self._ble.write_target()
+        if target:
+            self.target_text = '实际写入特征：%s' % target
+        state, message = self._ble.write_state()
+        if state == WRITE_SUCCESS:
+            self._finish('发送成功：%s' % (message or '已写入特征值'))
+        elif state == WRITE_FAILED:
+            self._finish('发送失败：%s' % (message or '未知原因'))
+        elif state == WRITE_SENDING and self._elapsed > WRITE_TIMEOUT:
+            # 客户端超时：清掉队列，否则后续命令会一直卡在"发送中"
+            self._ble.reset_writes()
+            self._finish('超时：设备 %.0f 秒内没有返回写入结果' % WRITE_TIMEOUT)
+        else:
+            self.result_text = '发送中…'
+
+    def _finish(self, text):
+        self.result_text = text
+        self._stop_poll()
+
+
+class ServicesPopup(Popup):
+    """列出已连接设备暴露的服务与特征，用来确认要写哪个 UUID。"""
+
+    def __init__(self, ble, **kwargs):
+        super(ServicesPopup, self).__init__(**kwargs)
+        self._ble = ble
+
+    def on_open(self, *args):
+        super(ServicesPopup, self).on_open(*args)
+        box = self.ids.service_list
+        box.clear_widgets()
+        items = self._ble.services_info()
+        if not items:
+            box.add_widget(ServiceRow(
+                text='还没读到服务列表。\n'
+                     '请确认设备已连接，并稍等一两秒（服务发现是异步完成的）后再打开本页。'))
+            return
+        for item in items:
+            row = ServiceRow()
+            if item['characteristic']:
+                row.text = '特征  %s\n属性  %s' % (item['characteristic'],
+                                                  item['properties'] or '未知')
+            else:
+                row.text = '服务  %s' % item['service']
+            box.add_widget(row)
 
 
 # ----------------------------------------------------------------------
@@ -266,8 +401,41 @@ class MainScreen(Screen):
     def do_disconnect(self):
         App.get_running_app().ble.disconnect()
 
+    def open_services_dialog(self):
+        if not self.connected:
+            show_info('未连接', '请先连接 BLE 设备，再查看它的服务与特征。')
+            return
+        ServicesPopup(ble=App.get_running_app().ble).open()
+
     def reserved(self, name):
+        # 功能一已接入真实命令下发，其余按钮仍是预留
+        if name == '功能一':
+            self._send_function_one()
+            return
         show_info('功能预留', '「%s」为预留功能，后续可在此接入具体医疗设备指令。' % name)
+
+    def _send_function_one(self):
+        app = App.get_running_app()
+        if not self.connected:
+            show_info('未连接', '请先连接 BLE 设备，再下发命令。')
+            return
+
+        frame = build_frame(CMD_FUNC_1)
+        if len(frame) > MAX_PAYLOAD:
+            show_info('命令过长',
+                      '当前命令 %d 字节，超过单次写入上限 %d 字节。' % (len(frame), MAX_PAYLOAD))
+            return
+
+        hex_data = to_hex(frame)
+        accepted, message = app.ble.send_command(ESP32_SERVICE_UUID,
+                                                 ESP32_WRITE_UUID,
+                                                 hex_data,
+                                                 auto_pick=ESP32_AUTO_PICK_WRITE)
+        CommandPopup(ble=app.ble,
+                     command_name='功能一',
+                     frame_hex=hex_data,
+                     accepted=accepted,
+                     message=message).open()
 
     def logout(self):
         App.get_running_app().logout()

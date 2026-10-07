@@ -16,6 +16,7 @@ HELPER_CLASS = 'com.med.bleassistant.ble.BleHelper'
 # 与 BleHelper.java 中的常量保持一致
 SCAN_IDLE, SCAN_RUNNING, SCAN_FAILED = 0, 1, 2
 CONN_IDLE, CONN_CONNECTING, CONN_CONNECTED, CONN_DISCONNECTED, CONN_FAILED = 0, 1, 2, 3, 4
+WRITE_IDLE, WRITE_SENDING, WRITE_SUCCESS, WRITE_FAILED = 0, 1, 2, 3
 
 _SCAN_STATE_TEXT = {SCAN_IDLE: '空闲', SCAN_RUNNING: '扫描中', SCAN_FAILED: '失败'}
 
@@ -240,6 +241,83 @@ class AndroidBleManager(object):
                 granted = False
             result.append('%s%s' % (label, '有' if granted else '无'))
         return ' '.join(result)
+
+    # ------------------------------------------------------------------
+    # 命令下发（界面上的功能按钮使用）
+    # ------------------------------------------------------------------
+    def send_command(self, service_uuid, char_uuid, hex_data, auto_pick=True):
+        """下发一条命令。返回 (是否受理, 提示)。
+
+        参数用十六进制字符串（如 'AA55010001'）而不是 bytes：
+        pyjnius 对 Java byte[] 的封送处理容易踩坑，字符串最稳妥。
+        受理只代表已入队，真正的写入结果要轮询 write_state()。
+
+        auto_pick=True 时，若按 UUID 找不到特征，会退化为"第一个可写特征"，
+        实际写的目标可用 write_target() 查到。
+        """
+        if not self.available:
+            return False, self._init_error or '蓝牙组件不可用'
+        try:
+            message = self._helper.writeCommand(service_uuid or '', char_uuid or '',
+                                                hex_data, bool(auto_pick))
+        except Exception as exc:
+            Logger.exception('BleAssistant: 下发命令失败')
+            return False, '下发命令异常：%s' % exc
+        message = str(message or '')
+        if message:
+            return False, message
+        return True, '命令已入队'
+
+    def write_target(self):
+        """最近一次命令实际写入的特征 UUID（用于确认到底写到哪去了）。"""
+        if not self.available:
+            return ''
+        try:
+            return str(self._helper.getLastWriteTarget() or '')
+        except Exception:
+            return ''
+
+    def write_state(self):
+        """返回 (状态码, 说明)：0 空闲 / 1 发送中 / 2 成功 / 3 失败。"""
+        if not self.available:
+            return WRITE_IDLE, self._init_error or ''
+        try:
+            return int(self._helper.getWriteState()), str(self._helper.getWriteMessage() or '')
+        except Exception:
+            Logger.exception('BleAssistant: 读取写入状态失败')
+            return WRITE_IDLE, ''
+
+    def reset_writes(self):
+        """清空待发队列（客户端超时时调用，避免队列卡死）。"""
+        if not self.available:
+            return
+        try:
+            self._helper.resetWrites()
+        except Exception:
+            Logger.exception('BleAssistant: 重置写入队列失败')
+
+    def services_info(self):
+        """列出已发现的服务与特征，用于在手机上确认 UUID。
+
+        返回 [{'service', 'characteristic', 'properties'}, ...]，
+        只列服务时 characteristic 为空字符串。
+        """
+        if not self.available:
+            return []
+        try:
+            raw = self._helper.getServicesInfo()
+        except Exception:
+            Logger.exception('BleAssistant: 读取服务列表失败')
+            return []
+        result = []
+        for line in raw or []:
+            parts = str(line).split('|')
+            while len(parts) < 3:
+                parts.append('')
+            result.append({'service': parts[0],
+                           'characteristic': parts[1],
+                           'properties': parts[2]})
+        return result
 
     # ------------------------------------------------------------------
     # 状态（供界面轮询）

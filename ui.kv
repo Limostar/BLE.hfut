@@ -76,6 +76,17 @@
             width: 1
             rounded_rectangle: self.x, self.y, self.width, self.height, dp(16)
 
+<ServiceRow>:
+    font_name: app.font_name
+    font_size: sp(11)
+    color: app.COLOR_TEXT
+    halign: 'left'
+    valign: 'top'
+    text_size: self.size
+    size_hint_y: None
+    height: dp(52)
+    padding: dp(8), dp(4)
+
 <DeviceRow>:
     font_name: app.font_name
     font_size: sp(13)
@@ -375,11 +386,18 @@
                 height: dp(48)
                 RoundButton:
                     text: '蓝牙连接'
+                    font_size: sp(14)
                     on_release: root.open_device_dialog()
                 RoundButton:
                     text: '断开连接'
+                    font_size: sp(14)
                     disabled: not root.connected
                     on_release: root.do_disconnect()
+                RoundButton:
+                    text: '服务/特征'
+                    font_size: sp(14)
+                    disabled: not root.connected
+                    on_release: root.open_services_dialog()
 
             Label:
                 text: '设备功能（连接成功后可用）'
@@ -511,3 +529,92 @@
             RoundButton:
                 text: '关闭'
                 on_release: root.dismiss()
+
+<CommandPopup>:
+    title: '命令下发'
+    title_font: app.font_name
+    title_size: sp(16)
+    title_color: app.COLOR_PRIMARY_DARK
+    separator_color: app.COLOR_LINE
+    size_hint: 0.9, None
+    height: dp(344)
+    BoxLayout:
+        orientation: 'vertical'
+        spacing: dp(10)
+        padding: dp(4)
+        Label:
+            text: '目标功能：%s' % root.command_name
+            font_name: app.font_name
+            font_size: sp(14)
+            color: app.COLOR_TEXT
+            halign: 'left'
+            text_size: self.size
+            size_hint_y: None
+            height: dp(22)
+        Label:
+            text: '命令内容（HEX）\n%s' % root.frame_hex
+            font_name: app.font_name
+            font_size: sp(12)
+            color: app.COLOR_TEXT_WEAK
+            halign: 'left'
+            valign: 'top'
+            text_size: self.size
+            size_hint_y: None
+            height: dp(56)
+        Label:
+            text: root.target_text
+            font_name: app.font_name
+            font_size: sp(11)
+            color: app.COLOR_TEXT_WEAK
+            halign: 'left'
+            valign: 'top'
+            text_size: self.size
+            size_hint_y: None
+            height: dp(44)
+        Label:
+            text: root.result_text
+            font_name: app.font_name
+            font_size: sp(14)
+            color: app.COLOR_TEXT
+            halign: 'left'
+            valign: 'top'
+            text_size: self.size
+            size_hint_y: None
+            height: dp(64)
+        RoundButton:
+            text: '关闭'
+            on_release: root.dismiss()
+
+<ServicesPopup>:
+    title: '服务 / 特征'
+    title_font: app.font_name
+    title_size: sp(16)
+    title_color: app.COLOR_PRIMARY_DARK
+    separator_color: app.COLOR_LINE
+    size_hint: 0.94, 0.8
+    BoxLayout:
+        orientation: 'vertical'
+        spacing: dp(8)
+        padding: dp(4)
+        Label:
+            text: '找到属性里带 WRITE 的那条特征，把它的 UUID 填进 main.py 的 ESP32_WRITE_UUID'
+            font_name: app.font_name
+            font_size: sp(11)
+            color: app.COLOR_TEXT_WEAK
+            halign: 'left'
+            valign: 'top'
+            text_size: self.size
+            size_hint_y: None
+            height: dp(44)
+        ScrollView:
+            do_scroll_x: False
+            bar_width: dp(3)
+            GridLayout:
+                id: service_list
+                cols: 1
+                spacing: dp(6)
+                size_hint_y: None
+                height: self.minimum_height
+        RoundButton:
+            text: '关闭'
+            on_release: root.dismiss()

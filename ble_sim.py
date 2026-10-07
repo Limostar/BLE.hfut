@@ -9,6 +9,7 @@ import time
 
 SCAN_IDLE, SCAN_RUNNING, SCAN_FAILED = 0, 1, 2
 CONN_IDLE, CONN_CONNECTING, CONN_CONNECTED, CONN_DISCONNECTED, CONN_FAILED = 0, 1, 2, 3, 4
+WRITE_IDLE, WRITE_SENDING, WRITE_SUCCESS, WRITE_FAILED = 0, 1, 2, 3
 
 _FAKE_DEVICES = [
     ('MedPro 心率监测仪', 'C8:1F:66:0A:11:01', -46),
@@ -17,8 +18,21 @@ _FAKE_DEVICES = [
     ('电子血压计 BP-5', 'E0:5A:1B:33:41:07', -83),
 ]
 
+# 桌面预览用的假 GATT 表，结构照 Nordic UART 来，方便对着界面调 UUID
+_FAKE_SERVICES = [
+    {'service': '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+     'characteristic': '', 'properties': 'service'},
+    {'service': '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+     'characteristic': '6e400002-b5a3-f393-e0a9-e50e24dcca9e',
+     'properties': 'WRITE WRITE_NO_RESPONSE'},
+    {'service': '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+     'characteristic': '6e400003-b5a3-f393-e0a9-e50e24dcca9e',
+     'properties': 'NOTIFY'},
+]
+
 SCAN_VISIBLE_AFTER = 1.0      # 扫描开始多久后逐个出现设备
 CONNECT_DELAY = 1.5           # 模拟连接耗时
+WRITE_DELAY = 0.4             # 模拟写入耗时
 
 
 class SimulatedBleManager(object):
@@ -29,6 +43,11 @@ class SimulatedBleManager(object):
         self._connected_address = None
         self._connect_started = None
         self._connect_target = None
+        self._write_started = None
+        self._write_result = None
+        self._write_message = ''
+        self._write_length = 0
+        self._write_target = ''
 
     # ------------------------------------------------------------------
     # 扫描
@@ -90,6 +109,47 @@ class SimulatedBleManager(object):
             return '正在扫描…', '已发现 %d 个 BLE 设备' % count, False
 
         return '未连接', '点击下方「蓝牙连接」搜索附近的 BLE 设备', False
+
+    # ------------------------------------------------------------------
+    # 命令下发（桌面模拟：延迟一点后返回成功）
+    # ------------------------------------------------------------------
+    def send_command(self, service_uuid, char_uuid, hex_data, auto_pick=True):
+        if not self._connected_address:
+            return False, 'device is not connected'
+        text = (hex_data or '').strip()
+        if not text or (len(text) % 2) != 0:
+            return False, 'command payload is empty or not valid hex'
+        if len(text) // 2 > 20:
+            return False, 'command payload is longer than a single write'
+        self._write_length = len(text) // 2
+        self._write_target = (char_uuid or '6e400002-b5a3-f393-e0a9-e50e24dcca9e '
+                                            '(auto-picked, desktop mock)').strip()
+        self._write_started = time.monotonic()
+        self._write_result = None
+        self._write_message = ''
+        return True, '命令已入队（桌面模拟）'
+
+    def write_target(self):
+        return self._write_target
+
+    def write_state(self):
+        if self._write_started is None:
+            return WRITE_IDLE, ''
+        if self._write_result is not None:
+            return self._write_result, self._write_message
+        if time.monotonic() - self._write_started >= WRITE_DELAY:
+            self._write_result = WRITE_SUCCESS
+            self._write_message = 'wrote %d byte(s) successfully' % self._write_length
+            return self._write_result, self._write_message
+        return WRITE_SENDING, ''
+
+    def reset_writes(self):
+        self._write_started = None
+        self._write_result = None
+        self._write_message = ''
+
+    def services_info(self):
+        return [dict(item) for item in _FAKE_SERVICES]
 
     # ------------------------------------------------------------------
     # 诊断（桌面模拟）

@@ -149,9 +149,67 @@ ble-assistant/
 | 应用名字（手机桌面显示） | `buildozer.spec` 里的 `title` |
 | 包名 | `buildozer.spec` 里的 `package.domain` + `package.name`（改完记得同步改 `javasrc` 下的目录名和 `BleHelper.java` 第一行的 `package`） |
 | 8 个按钮的文案 | `ui.kv` 里搜索 `功能一`…`功能八` |
-| 8 个按钮的实际功能 | `main.py` 里 `MainScreen.reserved()` 改成你自己的逻辑 |
+| 8 个按钮的实际功能 | `main.py` 里 `MainScreen.reserved()` |
+| **功能按钮要下发的 ESP32 命令** | `main.py` 顶部 `CMD_FUNC_1` 等常量 + `build_frame()` |
+| **要写哪个 BLE 特征** | `main.py` 顶部 `ESP32_WRITE_UUID` / `ESP32_SERVICE_UUID` |
 | 主题配色 | `main.py` 顶部的 `COLOR_PRIMARY` 等常量（现在主色是 `#00C853` 活力绿） |
 | 登录/注册规则（长度等） | `accounts.py` 顶部的 `MIN_USERNAME_LEN`、`MIN_PASSWORD_LEN` |
+
+### 给功能按钮接上 ESP32 命令（「功能一」已接好，其余照抄即可）
+
+**第 1 步：先确认该写哪个特征 UUID**
+
+连上 ESP32 后，点界面上的「**服务/特征**」按钮，手机上会列出该设备暴露的全部服务与特征及其属性。
+找到属性里带 `WRITE` 的那一条，把它的 UUID 填到 `main.py` 顶部的配置区：
+
+```python
+ESP32_WRITE_UUID = '你的写入特征 UUID'
+ESP32_SERVICE_UUID = ''      # 留空＝在所有服务里按上面的 UUID 查找，最省事
+```
+
+> 还有个调试开关 `ESP32_AUTO_PICK_WRITE`（默认 `True`）：按上面的 UUID 找不到特征时，
+> 自动改用设备上**第一个可写特征**，这样第一次构建就能先把链路跑通，
+> 弹窗里会显示它实际写到了哪个特征。正式使用时建议改成 `False`，只允许写约定的那一个。
+
+**第 2 步：确认命令帧格式**
+
+默认格式是 `[0xAA][0x55][命令字][数据长度][数据...][异或校验]`，
+由 `main.py` 里的 `build_frame()` 生成。要换成你们固件自己的格式，**只改这一个函数**即可。
+各按钮对应的命令字在 `CMD_FUNC_1` 这类常量里定义。
+
+**第 3 步：按下按钮之后发生了什么**
+
+```
+功能一按钮 → MainScreen._send_function_one()
+          → ble.send_command(uuid, uuid, 'AA55010001')
+          → Java(BleHelper) 入队 → 串行写入特征值 → onCharacteristicWrite 回调更新状态
+          → 弹窗每 0.3 秒轮询一次，显示 "发送中 / 发送成功 / 发送失败 / 超时" + 实际发出的 HEX
+```
+
+**第 4 步：一个已知限制**
+
+单次写入上限是 **20 字节**（蓝牙默认 MTU=23，减去 3 字节 ATT 协议头）。
+超过时 App 会明确弹「命令过长」，不会静默失败。要发更长的包需要先协商 MTU 再分片，
+这块目前没做——需要的话告诉我，我再加。
+
+### ESP32 端怎么配合（示例代码已附）
+
+`esp32/esp32_ble_receive/esp32_ble_receive.ino` 是一份可直接烧录的 Arduino 示例：
+
+- UUID 用的就是 App 的默认值（Nordic UART 那套），**不用改任何东西就能互通**；
+- 收到「功能一」会让 GPIO2（多数开发板的板载 LED）翻转，串口会打印收到的每一帧；
+- 帧解析是**流式状态机**：一帧被拆成多个 BLE 包也能拼回来，校验不过的帧直接丢弃并计数；
+- 换成 ESP-IDF / NimBLE 时，把 `feed_byte()` 这套状态机原样搬过去即可，它不依赖具体蓝牙框架。
+
+上手步骤：
+
+1. Arduino IDE 装好 esp32 开发板包，打开 `esp32_ble_receive.ino`；
+2. 选对开发板型号和串口，点「上传」；
+3. 打开串口监视器（波特率 **115200**），应看到「已开始广播，设备名 "ESP32-BLE-CMD"」；
+4. 手机 App 里连接它 → 点「功能一」→ 串口打印 `[CMD] 命令 0x01，数据 0 字节:`，板载 LED 翻转。
+
+> 安全提醒：这份示例**没有做鉴权**，任何手机都能连上并下发命令。
+> 用于真实的医疗设备前，建议至少加上配对/加密，或在帧里加一个身份/令牌字节。
 
 ---
 
