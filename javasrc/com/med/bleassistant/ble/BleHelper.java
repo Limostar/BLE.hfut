@@ -12,6 +12,8 @@ import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
 import android.content.Context;
 import android.content.Intent;
+import android.location.LocationManager;
+import android.os.Build;
 import android.util.Log;
 
 import java.util.LinkedHashMap;
@@ -99,6 +101,29 @@ public final class BleHelper {
             ctx.startActivity(intent);
         } catch (Throwable t) {
             Log.w(TAG, "requestEnable: " + t);
+        }
+    }
+
+    /**
+     * Whether the system location switch is on. BLE scan results are suppressed by
+     * Android when location services are off, unless BLUETOOTH_SCAN is declared with
+     * usesPermissionFlags="neverForLocation". Used for the on-screen diagnostics only.
+     */
+    public static boolean isLocationEnabled(Context ctx) {
+        try {
+            LocationManager manager =
+                    (LocationManager) ctx.getSystemService(Context.LOCATION_SERVICE);
+            if (manager == null) {
+                return false;
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                return manager.isLocationEnabled();
+            }
+            return manager.isProviderEnabled(LocationManager.GPS_PROVIDER)
+                    || manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+        } catch (Throwable t) {
+            Log.w(TAG, "isLocationEnabled: " + t);
+            return false;
         }
     }
 

@@ -91,6 +91,13 @@ class SimulatedBleManager(object):
 
         return '未连接', '点击下方「蓝牙连接」搜索附近的 BLE 设备', False
 
+    # ------------------------------------------------------------------
+    # 诊断（桌面模拟）
+    # ------------------------------------------------------------------
+    def diagnostics(self):
+        state = '扫描中' if self._scan_started is not None else '空闲'
+        return '桌面模拟环境 | 扫描 %s | 设备 %d' % (state, len(self.devices()))
+
     @staticmethod
     def _name_of(address):
         for name, addr, _rssi in _FAKE_DEVICES:

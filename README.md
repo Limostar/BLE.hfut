@@ -43,7 +43,7 @@ ble-assistant/
 ## 三、你需要准备什么
 
 1. 一个 **GitHub 账号**（免费注册：<https://github.com/signup>）
-2. 一台**安卓手机**（Android 6.0 及以上，建议 Android 8 以上）
+2. 一台**安卓手机**（Android 7.0 及以上，建议 Android 8 以上）
 3. 一个用来上传项目的工具，推荐 **GitHub Desktop**（图形界面，不用敲命令）：
    <https://desktop.github.com/>
 
@@ -125,6 +125,8 @@ ble-assistant/
    - Android 11 及以下：要允许 **「位置信息」** 权限（系统限制，无法绕过）；
    - **一定要点允许**，否则会提示扫描失败；
 7. 允许后稍等几秒，弹窗里会列出附近搜到的 BLE 设备（显示名称、MAC 地址、信号强度）；
+   弹窗里还有一行灰色的**诊断信息**，会显示「系统API / 蓝牙 / 扫描状态 / 错误码 / 三项权限 / 定位开关」，
+   搜不到设备时先看这一行，基本能直接判断卡在哪一环；
 8. 点你要连接的那个设备 → 连接成功后弹窗自动关闭，页面顶部状态变为绿色的 **「已连接」**，并显示设备名与已发现的服务数量；
 9. 此时 **8 个功能按钮全部解锁变绿**，点击任意一个会弹出「功能预留」提示；
 10. 需要更换设备时，先点「断开连接」，再点「蓝牙连接」重新搜索。
@@ -186,6 +188,57 @@ ble-assistant/
 **Q6：APK 有点大（约 50MB）？**
 主要是中文字体占了 ~18MB。想变小可以换成体积更小的中文字体（保持文件名不变即可），
 或者用 `fonttools` 做子集化，只保留用到的汉字。
+
+**Q7：构建报 `implicit declaration of function 'preadv'` / `'pwritev'`？**
+`buildozer.spec` 里的 `android.minapi` 被设得太低了。编译 CPython 时用到的
+`preadv` / `pwritev` 需要 **API >= 24** 才会在头文件里声明，低于 24 就会因为
+`-Werror=implicit-function-declaration` 直接中断。确认这一行是
+`android.minapi = 24`（或更高）即可。
+
+**Q8：构建报 `xxx-android_24_arm64_v8a.whl is not a supported wheel on this platform`？**
+这是当前 python-for-android（master 分支）的一个上游 bug：解析依赖时它用
+`--platform=android_24_arm64_v8a` 选中了「Android 专用 wheel」，并把该 wheel 的下载直链
+写进依赖清单；但真正执行 `pip install` 时又**漏了 `--platform` 参数**，
+于是 pip 拒绝这个「外来平台」的 wheel，构建中断。
+
+> 注意：只在 `buildozer.spec` 的 `requirements` 里写 `xxx==旧版本` **管不住它** ——
+> p4a 会先把版本号剥掉，再用一个独立的解析步骤去问「最新版对应哪个 wheel」。
+
+本项目的修法是用 pip 官方的**约束文件**管住那一步解析：
+
+- 工程根目录的 `constraints.txt` 里写着 `charset-normalizer==3.3.2`
+  （该包从 3.5.0 起才开始发布 Android wheel，钉到 3.3.2 后只剩通用轮子，不会再被选中）
+- 工作流第 8 步通过环境变量 `PIP_CONSTRAINT` 把它交给整个构建过程：
+
+```yaml
+      - name: 8. 编译 debug 版 APK
+        env:
+          PIP_CONSTRAINT: ${{ github.workspace }}/constraints.txt
+        run: buildozer -v android debug
+```
+
+如果将来**换成别的包名**报同样的错，把那个包补进 `constraints.txt` 并钉到
+它发布 Android wheel 之前的最后版本即可。
+
+> 上游的正式修复在 p4a 的 `develop` 分支。走那条路需要把宿主 Python 换成 3.14、
+> NDK 换成 29、API 换成 36，改动较大，本项目选择了更小的绕法。
+
+**Q9：点「蓝牙连接」后一直显示「已发现 0 个 BLE 设备」，一个都搜不到？**
+先看弹窗里那行灰色的**诊断信息**（它会显示扫描状态／错误码／三项权限／定位开关），
+它能直接指出问题在哪一环。
+
+**最常见的原因是手机的「定位 / 位置信息」总开关被关掉了。** Android 官方的规定是：
+> 定位服务关闭时，蓝牙扫描结果会被系统直接掐掉（而且不报任何错）；
+> 只有声明了 `usesPermissionFlags="neverForLocation"` 的应用才能在关闭定位时照常拿到扫描结果。
+
+本工程已经在 `buildozer.spec` 里给 `BLUETOOTH_SCAN` 声明了这个属性，
+所以用**修复后的 APK**，关着定位也能搜到设备；如果装的是修复前的旧版本，
+把手机定位开关打开就能搜到。
+
+其它可能原因：
+- 被测设备当前没有在广播（有些设备需要按键唤醒后才开始广播）；
+- 该设备已被另一台手机连接（不少 BLE 设备只允许一个中心设备连接）；
+- 权限被拒绝过：设置 → 应用 → 绿联蓝牙助手 → 权限 → 允许「附近的设备」。
 
 ---
 

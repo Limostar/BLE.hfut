@@ -6,6 +6,8 @@
 Python 侧只做"发起动作 + 轮询状态"，不直接接触 Java 回调接口。
 """
 
+import time
+
 from kivy.clock import Clock
 from kivy.logger import Logger
 
@@ -15,11 +17,13 @@ HELPER_CLASS = 'com.med.bleassistant.ble.BleHelper'
 SCAN_IDLE, SCAN_RUNNING, SCAN_FAILED = 0, 1, 2
 CONN_IDLE, CONN_CONNECTING, CONN_CONNECTED, CONN_DISCONNECTED, CONN_FAILED = 0, 1, 2, 3, 4
 
+_SCAN_STATE_TEXT = {SCAN_IDLE: '空闲', SCAN_RUNNING: '扫描中', SCAN_FAILED: '失败'}
+
 _SCAN_ERROR_TEXT = {
     -1: '无法获取蓝牙适配器，请确认手机支持蓝牙',
     -2: '蓝牙未开启，请先在系统设置中打开蓝牙',
     -3: '无法获取 BLE 扫描器，请确认手机支持低功耗蓝牙',
-    -4: '扫描启动失败，请检查「附近的设备」权限是否允许',
+    -4: '扫描被系统拒绝：请确认已允许「附近的设备」权限',
 }
 
 
@@ -31,8 +35,8 @@ class AndroidBleManager(object):
         self._activity = None
         self._init_error = ''
         self._note = ''
-        self._scanning = False
         self._pending_grant = None
+        self._last_start = 0.0
         self._setup()
 
     # ------------------------------------------------------------------
@@ -112,26 +116,38 @@ class AndroidBleManager(object):
             return
         self._note = ''
         self._ensure_permissions(self._do_start_scan)
-        # 用户此前已授权时，权限回调不一定触发，这里补一次
-        Clock.schedule_once(lambda dt: self._do_start_scan(), 1.2)
+        # 用户此前已授权时权限回调不一定触发，这里补一次
+        Clock.schedule_once(lambda dt: self._do_start_scan(), 0.8)
 
     def _do_start_scan(self):
-        if not self.available or self._scanning:
+        """发起扫描。
+
+        注意：不要用一个 Python 侧的标志位去判断"是否已在扫描" ——
+        Java 侧 startScan 内部会把异常吞掉，Python 以为成功、其实没启动，
+        之后权限回调再进来就会被那个标志位挡住，扫描永远起不来。
+        这里改为直接读 Java 侧的真实状态，重复调用是安全的
+        （Java 的 startScan 会先停掉上一次）。
+        """
+        if not self.available:
             return
+        now = time.monotonic()
         try:
             if not self._helper.isBluetoothEnabled(self._activity):
                 self._helper.requestEnable(self._activity)
                 self._note = '蓝牙未开启，请在系统弹窗中开启蓝牙'
                 return
+            if int(self._helper.getScanState()) == SCAN_RUNNING:
+                return
+            if now - self._last_start < 0.5:
+                return
+            self._last_start = now
             self._helper.clearDevices()
             self._helper.startScan(self._activity)
-            self._scanning = True
         except Exception:
             Logger.exception('BleAssistant: 启动扫描失败')
             self._note = '启动扫描失败，请查看日志'
 
     def stop_scan(self):
-        self._scanning = False
         if not self.available:
             return
         try:
@@ -182,11 +198,48 @@ class AndroidBleManager(object):
     def disconnect(self):
         if not self.available:
             return
-        self._scanning = False
         try:
             self._helper.disconnect()
         except Exception:
             Logger.exception('BleAssistant: 断开连接失败')
+
+    # ------------------------------------------------------------------
+    # 诊断（显示在设备弹窗里，出问题时能一眼看出卡在哪一环）
+    # ------------------------------------------------------------------
+    def diagnostics(self):
+        if not self.available:
+            return '蓝牙组件缺失：%s' % (self._init_error or '未知原因')
+        try:
+            return '系统API %d | 蓝牙 %s | 扫描 %s | 错误码 %d | 权限 %s | 定位 %s' % (
+                self._sdk_int(),
+                '开' if self._helper.isBluetoothEnabled(self._activity) else '关',
+                _SCAN_STATE_TEXT.get(int(self._helper.getScanState()), '未知'),
+                int(self._helper.getScanError()),
+                self._permission_text(),
+                '开' if self._helper.isLocationEnabled(self._activity) else '关',
+            )
+        except Exception as exc:
+            Logger.exception('BleAssistant: 读取诊断信息失败')
+            return '诊断信息读取失败：%s' % exc
+
+    def _permission_text(self):
+        try:
+            from android.permissions import check_permission
+        except Exception:
+            return '未知'
+        items = [('扫描', 'android.permission.BLUETOOTH_SCAN'),
+                 ('连接', 'android.permission.BLUETOOTH_CONNECT')]
+        # Android 12 (API 31) 起不再需要定位权限，只有更低版本才显示它，避免误导
+        if self._sdk_int() < 31:
+            items.append(('定位', 'android.permission.ACCESS_FINE_LOCATION'))
+        result = []
+        for label, name in items:
+            try:
+                granted = bool(check_permission(name))
+            except Exception:
+                granted = False
+            result.append('%s%s' % (label, '有' if granted else '无'))
+        return ' '.join(result)
 
     # ------------------------------------------------------------------
     # 状态（供界面轮询）
@@ -203,9 +256,6 @@ class AndroidBleManager(object):
         except Exception as exc:
             Logger.exception('BleAssistant: 读取蓝牙状态失败')
             return '蓝牙异常', str(exc), False
-
-        if scan != SCAN_RUNNING:
-            self._scanning = False
 
         if conn == CONN_CONNECTED:
             name = self._helper.getConnectedName() or '未命名设备'

@@ -121,6 +121,7 @@ class DevicePopup(Popup):
     def _refresh(self, dt):
         title, detail, _connected = self._ble.status()
         self.ids.popup_status.text = '%s · %s' % (title, detail.split('\n')[0])
+        self.ids.popup_diag.text = self._ble.diagnostics()
 
         devices = self._ble.devices()
         signature = tuple(device['address'] for device in devices)
@@ -145,6 +146,11 @@ class DevicePopup(Popup):
     def _pick(self, device):
         self.dismiss()
         self._on_pick(device)
+
+    def restart_scan(self):
+        """重新发起一次扫描（授权后、或长时间搜不到时用）。"""
+        self._known = None
+        self._ble.start_scan()
 
 
 # ----------------------------------------------------------------------
