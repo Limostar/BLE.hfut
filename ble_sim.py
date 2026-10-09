@@ -119,6 +119,17 @@ class SimulatedBleManager(object):
         return '未连接', '点击下方「蓝牙连接」搜索附近的 BLE 设备', False
 
     # ------------------------------------------------------------------
+    # 服务发现（桌面模拟：立即就绪）
+    # ------------------------------------------------------------------
+    def ensure_services(self, force=False):
+        return ''
+
+    def discovery_state(self):
+        if not self._connected_address:
+            return 0, ''
+        return 1, 'ok, 1 service(s) (desktop mock)'
+
+    # ------------------------------------------------------------------
     # 命令下发（桌面模拟：延迟一点后返回成功）
     # ------------------------------------------------------------------
     def send_command(self, service_uuid, char_uuid, hex_data, auto_pick=True):

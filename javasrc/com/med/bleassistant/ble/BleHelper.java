@@ -273,6 +273,9 @@ public final class BleHelper {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 connState = CONN_CONNECTED;
                 serviceCount = 0;
+                discoveryAttempts = 0;
+                discoveryLastAttemptAt = 0L;
+                discoveryMessage = "";
                 try {
                     BluetoothDevice device = g.getDevice();
                     if (device != null) {
@@ -280,9 +283,11 @@ public final class BleHelper {
                         String raw = device.getName();
                         connName = (raw == null) ? "" : raw.trim();
                     }
-                    g.discoverServices();
                 } catch (Throwable ignored) {
                 }
+                // discoverServices() often returns false when called right here,
+                // so the return value is checked and ensureServices() retries.
+                startServiceDiscovery(g);
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 connState = CONN_DISCONNECTED;
                 serviceCount = 0;
@@ -305,8 +310,13 @@ public final class BleHelper {
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 try {
                     serviceCount = g.getServices().size();
-                } catch (Throwable ignored) {
+                    discoveryMessage = "ok, " + serviceCount + " service(s)";
+                } catch (Throwable t) {
+                    discoveryMessage = "discovery callback threw: " + t;
                 }
+            } else {
+                // Keep the counter so ensureServices() can retry
+                discoveryMessage = "discovery failed, status=" + status;
             }
         }
 
@@ -378,6 +388,11 @@ public final class BleHelper {
             BluetoothDevice device = adapter.getRemoteDevice(address);
             connAddress = address;
             serviceCount = 0;
+            discoveryAttempts = 0;
+            discoveryLastAttemptAt = 0L;
+            discoveryMessage = "";
+            resetWrites();
+            resetNotify();
             connState = CONN_CONNECTING;
             gatt = device.connectGatt(ctx, false, GATT_CALLBACK);
             if (gatt == null) {
@@ -387,6 +402,108 @@ public final class BleHelper {
             Log.w(TAG, "connect: " + t);
             connState = CONN_FAILED;
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Service discovery
+    //
+    // Called straight from onConnectionStateChange() it very often returns
+    // false (stack timing differs per vendor), and a failure there leaves
+    // the GATT table empty - which makes every later write/notify fail.
+    // So the result is checked, retried by the UI poll loop, and surfaced
+    // to the user instead of failing silently.
+    // ------------------------------------------------------------------
+    private static final int MAX_DISCOVERY_ATTEMPTS = 8;
+    private static final long DISCOVERY_RETRY_INTERVAL_MS = 700L;
+    private static final long GATT_OP_TIMEOUT_MS = 3000L;
+
+    private static volatile int discoveryAttempts = 0;
+    private static volatile long discoveryLastAttemptAt = 0L;
+    private static volatile String discoveryMessage = "";
+    private static volatile long gattOpStartedAt = 0L;
+
+    private static void startServiceDiscovery(BluetoothGatt g) {
+        if (g == null) {
+            return;
+        }
+        discoveryAttempts++;
+        discoveryLastAttemptAt = System.currentTimeMillis();
+        boolean started = false;
+        try {
+            started = g.discoverServices();
+        } catch (Throwable t) {
+            Log.w(TAG, "discoverServices: " + t);
+        }
+        discoveryMessage = started
+                ? "discovering (attempt " + discoveryAttempts + ")"
+                : "discoverServices() returned false (attempt " + discoveryAttempts + ")";
+    }
+
+    /**
+     * Makes sure the GATT table is available. Idempotent and cheap: the UI poll
+     * loop calls it while the service list is still empty.
+     *
+     * @param force true for a manual retry from the UI (skips the counters).
+     * @return an empty string when nothing needs to be done, otherwise the reason.
+     */
+    public static String ensureServices(boolean force) {
+        BluetoothGatt g = gatt;
+        if (g == null || connState != CONN_CONNECTED) {
+            return "device is not connected";
+        }
+        if (serviceCount > 0 && !force) {
+            return "";
+        }
+        releaseStaleGattOp();
+        if (writing) {
+            return "busy with another GATT operation, will retry";
+        }
+        if (!force) {
+            if (discoveryAttempts >= MAX_DISCOVERY_ATTEMPTS) {
+                return "discovery gave up after " + discoveryAttempts
+                        + " attempts - disconnect and reconnect";
+            }
+            long now = System.currentTimeMillis();
+            if (now - discoveryLastAttemptAt < DISCOVERY_RETRY_INTERVAL_MS) {
+                return "";
+            }
+        }
+        startServiceDiscovery(g);
+        return "";
+    }
+
+    public static int getDiscoveryAttempts() {
+        return discoveryAttempts;
+    }
+
+    public static String getDiscoveryMessage() {
+        return discoveryMessage == null ? "" : discoveryMessage;
+    }
+
+    /**
+     * Releases a GATT operation that never reported back.
+     *
+     * Without this, one lost callback (a write or descriptor write that the
+     * stack never answers) would keep the "writing" flag set forever and every
+     * later command would sit in the queue unnoticed.
+     */
+    private static void releaseStaleGattOp() {
+        if (!writing) {
+            return;
+        }
+        long started = gattOpStartedAt;
+        if (started != 0L && System.currentTimeMillis() - started < GATT_OP_TIMEOUT_MS) {
+            return;
+        }
+        synchronized (WRITE_LOCK) {
+            writing = false;
+        }
+        if (writeState == WRITE_SENDING) {
+            writeState = WRITE_FAILED;
+            writeMessage = "the previous GATT operation never reported back, released";
+        }
+        Log.w(TAG, "releaseStaleGattOp: released a stuck GATT operation");
+        pumpWrites();
     }
 
     public static void disconnect() {
@@ -401,6 +518,9 @@ public final class BleHelper {
         gatt = null;
         connState = CONN_DISCONNECTED;
         serviceCount = 0;
+        discoveryAttempts = 0;
+        discoveryLastAttemptAt = 0L;
+        discoveryMessage = "";
         resetWrites();
         resetNotify();
     }
@@ -465,6 +585,9 @@ public final class BleHelper {
         if (gatt == null || connState != CONN_CONNECTED) {
             return "device is not connected";
         }
+        // Release a possibly stuck GATT operation first, otherwise this
+        // command would never be pumped out of the queue.
+        releaseStaleGattOp();
         BluetoothGattCharacteristic characteristic = findCharacteristic(serviceUuid, charUuid);
         if (characteristic == null && autoPick) {
             characteristic = findFirstWritable();
@@ -528,6 +651,7 @@ public final class BleHelper {
                 return;
             }
             writing = true;
+            gattOpStartedAt = System.currentTimeMillis();
         }
 
         BluetoothGatt g = gatt;
@@ -703,6 +827,7 @@ public final class BleHelper {
         if (notifyState == NOTIFY_SUBSCRIBED) {
             return "";
         }
+        releaseStaleGattOp();
         BluetoothGattCharacteristic characteristic = findCharacteristic(serviceUuid, charUuid);
         if (characteristic == null && autoPick) {
             characteristic = findFirstNotifiable();
@@ -744,6 +869,7 @@ public final class BleHelper {
                     return notifyMessage;
                 }
                 writing = true;      // released in onDescriptorWrite()
+                gattOpStartedAt = System.currentTimeMillis();
             } catch (Throwable t) {
                 Log.w(TAG, "enableNotify: " + t);
                 notifyState = NOTIFY_FAILED;

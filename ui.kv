@@ -616,7 +616,18 @@
             valign: 'top'
             text_size: self.size
             size_hint_y: None
-            height: dp(44)
+            height: dp(32)
+        Label:
+            id: service_state
+            text: '正在读取…'
+            font_name: app.font_name
+            font_size: sp(11)
+            color: app.COLOR_PRIMARY_DARK
+            halign: 'left'
+            valign: 'top'
+            text_size: self.size
+            size_hint_y: None
+            height: dp(32)
         ScrollView:
             do_scroll_x: False
             bar_width: dp(3)
@@ -626,6 +637,16 @@
                 spacing: dp(6)
                 size_hint_y: None
                 height: self.minimum_height
-        RoundButton:
-            text: '关闭'
-            on_release: root.dismiss()
+        BoxLayout:
+            orientation: 'horizontal'
+            spacing: dp(10)
+            size_hint_y: None
+            height: dp(46)
+            RoundButton:
+                text: '重新发现服务'
+                font_size: sp(13)
+                on_release: root.retry_discovery()
+            RoundButton:
+                text: '关闭'
+                font_size: sp(13)
+                on_release: root.dismiss()

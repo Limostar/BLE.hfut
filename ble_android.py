@@ -363,6 +363,32 @@ class AndroidBleManager(object):
         return [str(item) for item in (raw or [])]
 
     # ------------------------------------------------------------------
+    # 服务发现（异步，刚连上时经常一次不成功，需要重试）
+    # ------------------------------------------------------------------
+    def ensure_services(self, force=False):
+        """确保 GATT 服务表可用；幂等，界面轮询里反复调用是安全的。
+
+        返回空字符串表示"不用做什么"或"已重新发起"，否则是原因说明。
+        """
+        if not self.available:
+            return self._init_error or '蓝牙组件不可用'
+        try:
+            return str(self._helper.ensureServices(bool(force)) or '')
+        except Exception:
+            Logger.exception('BleAssistant: 服务发现失败')
+            return '服务发现调用异常'
+
+    def discovery_state(self):
+        """返回 (已发现服务数, 状态说明)。"""
+        if not self.available:
+            return 0, self._init_error or ''
+        try:
+            return (int(self._helper.getServiceCount()),
+                    str(self._helper.getDiscoveryMessage() or ''))
+        except Exception:
+            return 0, ''
+
+    # ------------------------------------------------------------------
     # 状态（供界面轮询）
     # ------------------------------------------------------------------
     def status(self):

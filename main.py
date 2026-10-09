@@ -249,10 +249,12 @@ class CommandPopup(Popup):
             self._finish('发送成功：%s' % (message or '已写入特征值'))
         elif state == WRITE_FAILED:
             self._finish('发送失败：%s' % (message or '未知原因'))
-        elif state == WRITE_SENDING and self._elapsed > WRITE_TIMEOUT:
-            # 客户端超时：清掉队列，否则后续命令会一直卡在"发送中"
+        elif self._elapsed > WRITE_TIMEOUT:
+            # 任何"非最终状态"超时都要报出来，
+            # 否则一旦 GATT 操作卡住，界面会永远停在"发送中…"
             self._ble.reset_writes()
-            self._finish('超时：设备 %.0f 秒内没有返回写入结果' % WRITE_TIMEOUT)
+            self._finish('超时：%.0f 秒内没有拿到写入结果'
+                         '（请确认设备已连接、且该特征可写）' % WRITE_TIMEOUT)
         else:
             self.result_text = '发送中…'
 
@@ -270,13 +272,25 @@ class ServicesPopup(Popup):
 
     def on_open(self, *args):
         super(ServicesPopup, self).on_open(*args)
+        self.refresh_list()
+
+    def retry_discovery(self):
+        """手动重新发起服务发现，1 秒后刷新列表。"""
+        self._ble.ensure_services(force=True)
+        Clock.schedule_once(lambda dt: self.refresh_list(), 1.0)
+
+    def refresh_list(self):
+        count, message = self._ble.discovery_state()
+        self.ids.service_state.text = '已发现服务 %d 个 · %s' % (count, message or '—')
+
         box = self.ids.service_list
         box.clear_widgets()
         items = self._ble.services_info()
         if not items:
             box.add_widget(ServiceRow(
-                text='还没读到服务列表。\n'
-                     '请确认设备已连接，并稍等一两秒（服务发现是异步完成的）后再打开本页。'))
+                text='服务列表为空（服务发现未成功）。\n'
+                     '点下面的「重新发现服务」重试；仍不行就断开重连，\n'
+                     '或把手机蓝牙关一下再打开（清掉安卓的 GATT 缓存）后重试。'))
             return
         for item in items:
             row = ServiceRow()
@@ -404,6 +418,12 @@ class MainScreen(Screen):
             return
         if self._notify_subscribed:
             return
+        # 服务发现是异步的，而且刚连上经常一次不成功：
+        # 还没拿到服务表就先催一次，别急着去订阅/写特征
+        count, _message = ble.discovery_state()
+        if count <= 0:
+            ble.ensure_services()
+            return
         state, _message = ble.notify_state()
         if state == NOTIFY_SUBSCRIBED:
             self._notify_subscribed = True
@@ -462,6 +482,18 @@ class MainScreen(Screen):
         app = App.get_running_app()
         if not self.connected:
             show_info('未连接', '请先连接 BLE 设备，再下发命令。')
+            return
+
+        # 没有服务表就写不进去：先催一次服务发现，别让你对着"发送中…"干等
+        service_count, discovery_message = app.ble.discovery_state()
+        if service_count <= 0:
+            app.ble.ensure_services(force=True)
+            show_info('设备的服务尚未就绪',
+                      '还没读到设备的服务/特征列表（当前 %d 个），无法确定往哪个特征写命令。\n\n'
+                      '已重新发起一次服务发现，请等 1~2 秒后再点「功能一」。\n'
+                      '若这里一直是 0：点「服务/特征」→「重新发现服务」，或断开重连、'
+                      '把手机蓝牙关一下再打开（清掉安卓的 GATT 缓存）。\n\n'
+                      '当前状态：%s' % (service_count, discovery_message or '未知'))
             return
 
         frame = build_frame(CMD_FUNC_1)
