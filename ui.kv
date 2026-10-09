@@ -95,7 +95,7 @@
     valign: 'middle'
     text_size: self.size
     size_hint_y: None
-    height: dp(76)
+    height: dp(72)
     padding: dp(10), dp(6)
 
 <DeviceRow>:
@@ -390,12 +390,19 @@
                             valign: 'middle'
                             text_size: self.size
 
-            RoundButton:
-                text: root.reply_label
-                font_size: sp(12)
+            BoxLayout:
+                orientation: 'horizontal'
+                spacing: dp(10)
                 size_hint_y: None
                 height: dp(38)
-                on_release: root.open_reply_dialog()
+                RoundButton:
+                    text: root.reply_label
+                    font_size: sp(12)
+                    on_release: root.open_reply_dialog()
+                RoundButton:
+                    text: '模块诊断'
+                    font_size: sp(12)
+                    on_release: root.open_diag_dialog()
 
             BoxLayout:
                 orientation: 'horizontal'
@@ -713,3 +720,44 @@
                 text: '关闭'
                 font_size: sp(13)
                 on_release: root.dismiss()
+
+<ModuleDiagPopup>:
+    title: '模块诊断（AT 指令通道）'
+    title_font: app.font_name
+    title_size: sp(15)
+    title_color: app.COLOR_PRIMARY_DARK
+    separator_color: app.COLOR_LINE
+    size_hint: 0.94, 0.78
+    BoxLayout:
+        orientation: 'vertical'
+        spacing: dp(8)
+        padding: dp(4)
+        Label:
+            text: '这条通道只走蓝牙、不经过串口，用来读模块自身的设置'
+            font_name: app.font_name
+            font_size: sp(11)
+            color: app.COLOR_TEXT_WEAK
+            halign: 'left'
+            valign: 'middle'
+            text_size: self.size
+            size_hint_y: None
+            height: dp(22)
+        ScrollView:
+            id: diag_scroll
+            do_scroll_x: False
+            bar_width: dp(3)
+            Label:
+                id: diag_label
+                text: root.result_text
+                font_name: app.font_name
+                font_size: sp(12)
+                color: app.COLOR_TEXT
+                halign: 'left'
+                valign: 'top'
+                text_size: (diag_scroll.width - dp(16)), None
+                size_hint_y: None
+                height: max(self.texture_size[1], dp(24))
+        RoundButton:
+            text: '关闭'
+            font_size: sp(13)
+            on_release: root.dismiss()

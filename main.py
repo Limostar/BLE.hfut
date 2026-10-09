@@ -70,6 +70,12 @@ ESP32_SERVICE_UUID = ''
 # 回传（ESP32 → 手机）用的通知特征 UUID。必须等于 sketch 里的 CHAR_TX_UUID。
 ESP32_NOTIFY_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'
 
+# 模块自带的 AT 指令通道 UUID（只走蓝牙、不经过串口）
+# 用于"模块诊断"：读模块的版本/角色/波特率/状态显示/用户鉴权等设置。
+# 一旦模块开了用户鉴权(AT+AUTH=1)，App 没有鉴权密码，模块会静默丢弃手机写入的数据
+# —— 现象与"串口线没接"一模一样，所以这个诊断很有用。
+ESP32_AT_UUID = '6e400004-b5a3-f393-e0a9-e50e24dcca9e'
+
 # 自动兜底开关：默认关闭（要确定性）。
 # 打开它意味着"按 UUID 找不到就随便挑一个可写的特征"——曾经因为安卓 GATT 表里
 # Generic Access 的 Device Name(2A00) 也是可写的，命令被写进了设备名里，
@@ -372,13 +378,94 @@ class ReplyHistoryPopup(Popup):
                 text='本次还没有收到设备回传。\n'
                      '连接设备后点「功能一」，设备回传的内容会记录在这里。'))
             return
-        # 最新的排在最上面
+        # 最新的排在最上面。
+        # 每条只占两行：行高固定时多行会被裁掉（手机上字体放大后更明显），
+        # 所以原始字节只在"文字为空"时才内联显示，避免挤成三行。
         for stamp, cmd, text, raw_hex in reversed(self._history):
-            box.add_widget(ReplyRow(
-                text='%s    命令字 0x%02X    载荷 %d 字节\n文字：%s\n原始：%s'
-                     % (stamp, cmd, len(raw_hex) // 2,
-                        text if text.strip() else '（空或不可见）',
-                        raw_hex or '（空）')))
+            if text.strip():
+                shown = text
+            else:
+                shown = '（空或不可见，原始：%s）' % (raw_hex or '空')
+            box.add_widget(ReplyRow(text='%s    命令字 0x%02X · %d 字节\n%s'
+                                         % (stamp, cmd, len(raw_hex) // 2, shown)))
+
+
+# ----------------------------------------------------------------------
+# 模块诊断（AT 指令通道，只走蓝牙）
+# ----------------------------------------------------------------------
+AT_QUERIES = ['AT+VERSION?', 'AT+ROLE?', 'AT+UART?', 'AT+STATUS?', 'AT+AUTH?', 'AT+NAME?']
+
+
+class ModuleDiagPopup(Popup):
+    """通过模块自带的 AT 指令通道（6E400004）读取模块设置。
+
+    这条通道只走蓝牙、不经过串口，所以即使"模块 → 电脑"那根线没通，
+    也能确认模块本身是否正常、以及关键设置（尤其 AT+AUTH 是否开启）。
+    """
+
+    result_text = StringProperty('')
+
+    def __init__(self, ble, **kwargs):
+        super(ModuleDiagPopup, self).__init__(**kwargs)
+        self._ble = ble
+        self._lines = []
+        self._timer = None
+        self._sent = 0
+        self._elapsed = 0.0
+
+    def on_open(self, *args):
+        super(ModuleDiagPopup, self).on_open(*args)
+        state, message = self._ble.at_notify_state()
+        if state != NOTIFY_SUBSCRIBED:
+            self.result_text = ('AT 通道尚未订阅：%s（%s）\n\n'
+                                '请确认设备已连接，等 1~2 秒后重新打开本页。'
+                                % (_NOTIFY_STATE_TEXT.get(state, '未知'), message or '—'))
+            return
+        self._lines = ['AT 通道已订阅，开始查询模块设置…']
+        self._refresh_text()
+        self._timer = Clock.schedule_interval(self._step, 0.35)
+
+    def on_dismiss(self, *args):
+        super(ModuleDiagPopup, self).on_dismiss(*args)
+        self._stop()
+
+    def _stop(self):
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
+
+    def _step(self, dt):
+        self._elapsed += dt
+        self._collect_replies()
+        if self._sent < len(AT_QUERIES):
+            query = AT_QUERIES[self._sent]
+            self._sent += 1
+            self._lines.append('>> %s' % query)
+            self._refresh_text()
+            # 写操作由 GATT 队列串行化，不用自己再加间隔
+            self._ble.send_command('', ESP32_AT_UUID,
+                                   to_hex((query + '\r\n').encode('utf-8')))
+            return
+        if self._elapsed > len(AT_QUERIES) * 0.35 + 3.0:
+            self._lines.append('查询结束，把这里的内容截图发我即可。')
+            self._refresh_text()
+            self._stop()
+
+    def _collect_replies(self):
+        for chunk in self._ble.pop_received_at():
+            try:
+                raw = bytes(bytearray.fromhex(chunk))
+            except ValueError:
+                continue
+            text = raw.decode('utf-8', 'replace').replace('\r', '')
+            for line in text.split('\n'):
+                line = line.strip()
+                if line:
+                    self._lines.append('<< %s' % line)
+        self._refresh_text()
+
+    def _refresh_text(self):
+        self.result_text = '\n'.join(self._lines[-60:])
 
 
 # ----------------------------------------------------------------------
@@ -461,6 +548,7 @@ class MainScreen(Screen):
         self._poll = None
         self._parser = RxFrameParser()
         self._notify_subscribed = False
+        self._at_subscribed = False
         self._replies = []          # 本次登录期间收到的设备回传
 
     def on_enter(self, *args):
@@ -494,11 +582,10 @@ class MainScreen(Screen):
     # 回传（ESP32 → 手机）
     # ------------------------------------------------------------------
     def _keep_notify(self, ble, connected):
-        """连上就自动订阅回传通知；订阅幂等，没成功会在下一轮重试。"""
+        """连上就自动订阅回传通知与 AT 通道；订阅幂等，没成功会在下一轮重试。"""
         if not connected:
             self._notify_subscribed = False
-            return
-        if self._notify_subscribed:
+            self._at_subscribed = False
             return
         # 服务发现是异步的，而且刚连上经常一次不成功：
         # 还没拿到服务表就先催一次，别急着去订阅/写特征
@@ -506,14 +593,22 @@ class MainScreen(Screen):
         if count <= 0:
             ble.ensure_services()
             return
-        state, _message = ble.notify_state()
-        if state == NOTIFY_SUBSCRIBED:
-            self._notify_subscribed = True
-            return
-        if state == NOTIFY_SUBSCRIBING:
-            return
-        ble.enable_notify(ESP32_SERVICE_UUID, ESP32_NOTIFY_UUID,
-                          auto_pick=ESP32_AUTO_PICK_NOTIFY)
+
+        if not self._notify_subscribed:
+            state, _message = ble.notify_state()
+            if state == NOTIFY_SUBSCRIBED:
+                self._notify_subscribed = True
+            elif state != NOTIFY_SUBSCRIBING:
+                ble.enable_notify(ESP32_SERVICE_UUID, ESP32_NOTIFY_UUID,
+                                  auto_pick=ESP32_AUTO_PICK_NOTIFY)
+
+        # 数据通道就绪后，顺便订阅模块的 AT 指令通道（供"模块诊断"使用）
+        if self._notify_subscribed and not self._at_subscribed:
+            state, _message = ble.at_notify_state()
+            if state == NOTIFY_SUBSCRIBED:
+                self._at_subscribed = True
+            elif state != NOTIFY_SUBSCRIBING:
+                ble.enable_at_notify('', ESP32_AT_UUID)
 
     def _drain_incoming(self, ble):
         chunks = ble.pop_received()
@@ -562,6 +657,13 @@ class MainScreen(Screen):
 
     def open_reply_dialog(self):
         ReplyHistoryPopup(history=self.replies(), on_clear=self.clear_replies).open()
+
+    def open_diag_dialog(self):
+        """模块诊断：走模块自带的 AT 通道读它自己的设置（不经过串口）。"""
+        if not self.connected:
+            show_info('未连接', '请先连接 BLE 设备，再做模块诊断。')
+            return
+        ModuleDiagPopup(ble=App.get_running_app().ble).open()
 
     def open_device_dialog(self):
         if self.connected:

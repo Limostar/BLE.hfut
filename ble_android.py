@@ -398,6 +398,45 @@ class AndroidBleManager(object):
             return ''
 
     # ------------------------------------------------------------------
+    # 模块 AT 指令通道（6E400004）：只走蓝牙、不经过串口，
+    # 所以即使"模块→电脑"那条线不通，也能用它读模块自身的设置。
+    # ------------------------------------------------------------------
+    def enable_at_notify(self, service_uuid, char_uuid):
+        """订阅模块的 AT 指令通道（幂等）。返回 (是否受理, 提示)。"""
+        if not self.available:
+            return False, self._init_error or '蓝牙组件不可用'
+        try:
+            message = self._helper.enableAtNotify(service_uuid or '', char_uuid or '')
+        except Exception as exc:
+            Logger.exception('BleAssistant: 订阅 AT 通道失败')
+            return False, '订阅 AT 通道异常：%s' % exc
+        message = str(message or '')
+        if message:
+            return False, message
+        return True, ''
+
+    def at_notify_state(self):
+        """返回 (状态码, 说明)，含义与 notify_state() 相同。"""
+        if not self.available:
+            return NOTIFY_OFF, ''
+        try:
+            return (int(self._helper.getAtNotifyState()),
+                    str(self._helper.getAtNotifyMessage() or ''))
+        except Exception:
+            return NOTIFY_OFF, ''
+
+    def pop_received_at(self):
+        """取出并清空 AT 通道的回复（每项是一个十六进制字符串）。"""
+        if not self.available:
+            return []
+        try:
+            raw = self._helper.popReceivedAt()
+        except Exception:
+            Logger.exception('BleAssistant: 读取 AT 通道数据失败')
+            return []
+        return [str(item) for item in (raw or [])]
+
+    # ------------------------------------------------------------------
     # 状态（供界面轮询）
     # ------------------------------------------------------------------
     def _notify_text(self):

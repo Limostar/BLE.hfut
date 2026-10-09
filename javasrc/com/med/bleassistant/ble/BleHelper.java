@@ -344,12 +344,18 @@ public final class BleHelper {
         @Override
         public void onDescriptorWrite(BluetoothGatt g, BluetoothGattDescriptor descriptor, int status) {
             if (CCCD_UUID.equals(descriptor.getUuid())) {
-                if (status == BluetoothGatt.GATT_SUCCESS) {
-                    notifyState = NOTIFY_SUBSCRIBED;
-                    notifyMessage = "subscribed to " + notifyTarget;
+                BluetoothGattCharacteristic owner = descriptor.getCharacteristic();
+                String ownerUuid = (owner != null) ? owner.getUuid().toString() : "";
+                String message = (status == BluetoothGatt.GATT_SUCCESS)
+                        ? "subscribed"
+                        : "CCCD write failed, status=" + status;
+                if (isAtTarget(ownerUuid)) {
+                    atState = (status == BluetoothGatt.GATT_SUCCESS) ? NOTIFY_SUBSCRIBED : NOTIFY_FAILED;
+                    atMessage = message;
                 } else {
-                    notifyState = NOTIFY_FAILED;
-                    notifyMessage = "CCCD write failed, status=" + status;
+                    notifyState = (status == BluetoothGatt.GATT_SUCCESS) ? NOTIFY_SUBSCRIBED : NOTIFY_FAILED;
+                    notifyMessage = (status == BluetoothGatt.GATT_SUCCESS)
+                            ? "subscribed to " + notifyTarget : message;
                 }
             }
             synchronized (WRITE_LOCK) {
@@ -367,13 +373,13 @@ public final class BleHelper {
                 value = c.getValue();
             } catch (Throwable ignored) {
             }
-            storeReceived(value);
+            storeReceived(c, value);
         }
 
         @Override
         public void onCharacteristicChanged(BluetoothGatt g, BluetoothGattCharacteristic c,
                                             byte[] value) {
-            storeReceived(value);
+            storeReceived(c, value);
         }
     };
 
@@ -851,12 +857,108 @@ public final class BleHelper {
 
     private static final Object RECEIVE_LOCK = new Object();
     private static final Queue<String> RECEIVED = new LinkedList<String>();
+    /** AT channel (6E400004) replies are kept separate from the data channel. */
+    private static final Queue<String> RECEIVED_AT = new LinkedList<String>();
 
     private static volatile int notifyState = NOTIFY_OFF;
     private static volatile String notifyMessage = "";
     private static volatile String notifyTarget = "";
+    private static volatile int atState = NOTIFY_OFF;
+    private static volatile String atMessage = "";
+    private static volatile String atTarget = "";
     private static volatile int receivedChunks = 0;
     private static volatile int receivedDropped = 0;
+
+    private static boolean isAtTarget(String uuid) {
+        return atTarget != null && !atTarget.isEmpty()
+                && uuid != null && uuid.equalsIgnoreCase(atTarget);
+    }
+
+    /**
+     * Subscribes to the module's AT command channel (6E400004).
+     *
+     * That channel goes over BLE only - it does not touch the UART - so it can
+     * tell us whether the module itself is alive and how it is configured,
+     * even when nothing ever comes out of its serial TX pin.
+     */
+    public static String enableAtNotify(String serviceUuid, String charUuid) {
+        BluetoothGatt g = gatt;
+        if (g == null || connState != CONN_CONNECTED) {
+            return "device is not connected";
+        }
+        if (atState == NOTIFY_SUBSCRIBED) {
+            return "";
+        }
+        releaseStaleGattOp();
+
+        BluetoothGattCharacteristic characteristic = findCharacteristic(serviceUuid, charUuid);
+        if (characteristic == null) {
+            return "AT characteristic not found (" + charUuid + ")";
+        }
+        int properties = characteristic.getProperties();
+        boolean indicate = (properties & BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0;
+        if (!indicate && (properties & BluetoothGattCharacteristic.PROPERTY_NOTIFY) == 0) {
+            return "AT characteristic does not support notify";
+        }
+
+        synchronized (WRITE_LOCK) {
+            if (writing) {
+                return "busy with another GATT operation, will retry";
+            }
+            try {
+                if (!g.setCharacteristicNotification(characteristic, true)) {
+                    atState = NOTIFY_FAILED;
+                    atMessage = "setCharacteristicNotification() failed";
+                    return atMessage;
+                }
+                BluetoothGattDescriptor cccd = characteristic.getDescriptor(CCCD_UUID);
+                if (cccd == null) {
+                    atTarget = characteristic.getUuid().toString();
+                    atState = NOTIFY_SUBSCRIBED;
+                    atMessage = "subscribed locally (no CCCD)";
+                    return "";
+                }
+                cccd.setValue(indicate ? BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+                                       : BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                if (!g.writeDescriptor(cccd)) {
+                    atState = NOTIFY_FAILED;
+                    atMessage = "writeDescriptor() was rejected";
+                    return atMessage;
+                }
+                writing = true;
+                gattOpStartedAt = System.currentTimeMillis();
+            } catch (Throwable t) {
+                Log.w(TAG, "enableAtNotify: " + t);
+                atState = NOTIFY_FAILED;
+                atMessage = "enableAtNotify threw: " + t;
+                return atMessage;
+            }
+        }
+        atTarget = characteristic.getUuid().toString();
+        atState = NOTIFY_SUBSCRIBING;
+        atMessage = "";
+        return "";
+    }
+
+    public static int getAtNotifyState() {
+        return atState;
+    }
+
+    public static String getAtNotifyMessage() {
+        return atMessage == null ? "" : atMessage;
+    }
+
+    /** Drains the AT channel replies (hex strings), used by the diagnostics page. */
+    public static String[] popReceivedAt() {
+        synchronized (RECEIVE_LOCK) {
+            if (RECEIVED_AT.isEmpty()) {
+                return new String[0];
+            }
+            String[] out = RECEIVED_AT.toArray(new String[0]);
+            RECEIVED_AT.clear();
+            return out;
+        }
+    }
 
     /**
      * Subscribes to the notification characteristic (idempotent).
@@ -962,7 +1064,7 @@ public final class BleHelper {
         }
     }
 
-    private static void storeReceived(byte[] value) {
+    private static void storeReceived(BluetoothGattCharacteristic characteristic, byte[] value) {
         if (value == null || value.length == 0) {
             return;
         }
@@ -970,12 +1072,16 @@ public final class BleHelper {
         for (int i = 0; i < value.length; i++) {
             hex.append(String.format("%02x", value[i] & 0xFF));
         }
+        String uuid = (characteristic != null) ? characteristic.getUuid().toString() : "";
         synchronized (RECEIVE_LOCK) {
-            if (RECEIVED.size() >= MAX_RECEIVED_CHUNKS) {
-                RECEIVED.poll();
+            // AT channel (6E400004) replies go to their own queue, so they never
+            // get mixed into the data channel frame stream.
+            Queue<String> queue = isAtTarget(uuid) ? RECEIVED_AT : RECEIVED;
+            if (queue.size() >= MAX_RECEIVED_CHUNKS) {
+                queue.poll();
                 receivedDropped++;
             }
-            RECEIVED.add(hex.toString());
+            queue.add(hex.toString());
         }
         receivedChunks++;
     }
@@ -984,8 +1090,12 @@ public final class BleHelper {
         notifyState = NOTIFY_OFF;
         notifyMessage = "";
         notifyTarget = "";
+        atState = NOTIFY_OFF;
+        atMessage = "";
+        atTarget = "";
         synchronized (RECEIVE_LOCK) {
             RECEIVED.clear();
+            RECEIVED_AT.clear();
         }
     }
 

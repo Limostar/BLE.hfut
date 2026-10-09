@@ -17,6 +17,17 @@ NOTIFY_OFF, NOTIFY_SUBSCRIBING, NOTIFY_SUBSCRIBED, NOTIFY_FAILED = 0, 1, 2, 3
 # 模拟设备收到「功能一」后回传的内容（与 ESP32 端保持一致）
 SIM_REPLY_TEXT = 'Hello World'
 
+# 模块 AT 指令通道（与真机一致）
+AT_UUID = '6e400004-b5a3-f393-e0a9-e50e24dcca9e'
+SIM_AT_REPLIES = {
+    'AT+VERSION?': 'AT+VERSION=2024.12.31\r\nOK\r\n',
+    'AT+ROLE?': 'AT+ROLE=0 OK\r\n',
+    'AT+UART?': 'AT+UART=115200 OK\r\n',
+    'AT+STATUS?': 'AT+STATUS=1 OK\r\n',
+    'AT+AUTH?': 'AT+AUTH=0,0000,15 OK\r\n',
+    'AT+NAME?': 'AT+NAME=0,Tv700u-2FF1CF OK\r\n',
+}
+
 _FAKE_DEVICES = [
     ('MedPro 心率监测仪', 'C8:1F:66:0A:11:01', -46),
     ('MedPro 血氧指夹', 'C8:1F:66:0A:11:02', -58),
@@ -56,6 +67,8 @@ class SimulatedBleManager(object):
         self._write_target = ''
         self._notify_state = NOTIFY_OFF
         self._pending_received = []
+        self._at_state = NOTIFY_OFF
+        self._pending_at = []
 
     # ------------------------------------------------------------------
     # 扫描
@@ -93,6 +106,8 @@ class SimulatedBleManager(object):
         # 与 Java 侧保持一致：断开时清掉订阅状态与残留回传
         self._notify_state = NOTIFY_OFF
         self._pending_received = []
+        self._at_state = NOTIFY_OFF
+        self._pending_at = []
         self.reset_writes()
 
     # ------------------------------------------------------------------
@@ -141,6 +156,23 @@ class SimulatedBleManager(object):
         return 'cleared (desktop mock)'
 
     # ------------------------------------------------------------------
+    # 模块 AT 指令通道（桌面模拟：订阅即成功，按指令回一份合理的回复）
+    # ------------------------------------------------------------------
+    def enable_at_notify(self, service_uuid, char_uuid):
+        if not self._connected_address:
+            return False, 'device is not connected'
+        self._at_state = NOTIFY_SUBSCRIBED
+        return True, ''
+
+    def at_notify_state(self):
+        return self._at_state, ''
+
+    def pop_received_at(self):
+        chunks = self._pending_at
+        self._pending_at = []
+        return chunks
+
+    # ------------------------------------------------------------------
     # 命令下发（桌面模拟：延迟一点后返回成功）
     # ------------------------------------------------------------------
     def send_command(self, service_uuid, char_uuid, hex_data, auto_pick=True):
@@ -149,6 +181,17 @@ class SimulatedBleManager(object):
         text = (hex_data or '').strip()
         if not text or (len(text) % 2) != 0:
             return False, 'command payload is empty or not valid hex'
+
+        # 写到 AT 通道：模拟模块回一条合理的 AT 回复
+        if AT_UUID in (char_uuid or '').lower():
+            try:
+                query = bytes(bytearray.fromhex(text)).decode('utf-8', 'replace').strip()
+            except ValueError:
+                query = ''
+            reply = SIM_AT_REPLIES.get(query, 'OK\r\n')
+            self._pending_at.append(to_hex(reply.encode('utf-8')))
+            return True, ''
+
         if len(text) // 2 > 20:
             return False, 'command payload is longer than a single write'
         self._write_length = len(text) // 2
