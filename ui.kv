@@ -95,7 +95,7 @@
     valign: 'top'
     text_size: self.size
     size_hint_y: None
-    height: dp(52)
+    height: dp(44)
 
 <PopupRow>:
     font_name: app.font_name
@@ -106,6 +106,18 @@
     text_size: self.size
     size_hint_y: None
     height: dp(40)
+
+# 主界面上固定显示的"AT 检验 6 行"：一行一个固定高度标签，
+# 与状态卡/服务页绿字完全同一套写法（该写法已在手机上验证可正常显示）
+<DiagLine@Label>:
+    font_name: app.font_name
+    font_size: sp(10)
+    color: app.COLOR_TEXT
+    halign: 'left'
+    valign: 'top'
+    text_size: self.size
+    size_hint_y: None
+    height: dp(18)
 
 <DeviceRow>:
     font_name: app.font_name
@@ -409,23 +421,29 @@
                     font_size: sp(12)
                     on_release: root.open_reply_dialog()
                 RoundButton:
-                    text: '模块诊断'
+                    text: root.diag_button
                     font_size: sp(12)
                     on_release: root.run_module_diag()
 
-            # 模块诊断结果直接显示在这里（和状态卡同一套固定高度标签，
-            # 是已经在手机上验证过能正常显示的写法；不依赖弹窗正文）
-            Label:
-                id: diag_label
-                text: root.diag_line
-                font_name: app.font_name
-                font_size: sp(11)
-                color: app.COLOR_PRIMARY_DARK
-                halign: 'left'
-                valign: 'middle'
-                text_size: self.size
-                size_hint_y: None
-                height: dp(22)
+            # ---------- AT 检验 6 行（固定常显，便于截图确认）----------
+            DiagLine:
+                id: diag_1
+                text: '固件版本：未查询'
+            DiagLine:
+                id: diag_2
+                text: '设备角色：未查询'
+            DiagLine:
+                id: diag_3
+                text: '串口波特率：未查询'
+            DiagLine:
+                id: diag_4
+                text: '状态显示：未查询'
+            DiagLine:
+                id: diag_5
+                text: '用户鉴权：未查询'
+            DiagLine:
+                id: diag_6
+                text: '设备名称：未查询'
 
             BoxLayout:
                 orientation: 'horizontal'
@@ -447,24 +465,14 @@
                     disabled: not root.connected
                     on_release: root.open_services_dialog()
 
-            Label:
-                text: '设备功能（连接成功后可用）'
-                font_name: app.font_name
-                font_size: sp(12)
-                color: app.COLOR_TEXT_WEAK
-                halign: 'left'
-                text_size: self.size
-                size_hint_y: None
-                height: dp(20)
-
         # ---------- 8 个预留功能按钮 ----------
         GridLayout:
             id: func_grid
             cols: 2
-            spacing: dp(10)
+            spacing: dp(8)
             padding: dp(18), dp(6), dp(18), dp(14)
             size_hint_y: None
-            height: dp(4 * 48 + 3 * 10 + 20)
+            height: dp(4 * 42 + 3 * 8 + 20)
             RoundButton:
                 text: '功能一'
                 disabled: not root.connected
@@ -694,7 +702,7 @@
     title_size: sp(16)
     title_color: app.COLOR_PRIMARY_DARK
     separator_color: app.COLOR_LINE
-    size_hint: 0.94, 0.82
+    size_hint: 0.94, 0.95
     BoxLayout:
         orientation: 'vertical'
         spacing: dp(2)

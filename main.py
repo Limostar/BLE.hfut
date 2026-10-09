@@ -401,16 +401,19 @@ class ReplyHistoryPopup(Popup):
     def refresh_list(self):
         total = len(self._history)
         self.ids.reply_state.text = clip_line(
-            '本次登录共 %d 条，下面显示最近 %d 条'
+            '本次登录共 %d 条，下面显示最近 %d 条（最新在最上面）'
             % (total, min(total, self.MAX_ROWS)))
 
         box = self.ids.reply_list
         box.clear_widgets()
-        if not self._history:
+        visible = self._history[-self.MAX_ROWS:]
+        if not visible:
             box.add_widget(ReplyRow(text='本次还没有收到设备回传'))
             return
-        # 每条压缩成一行（长度受控），用和状态卡/服务页绿字完全相同的标签写法
-        for stamp, label, text, raw_hex in reversed(self._history[-self.MAX_ROWS:]):
+        # 关键：按时间顺序 add（旧的先加），最后加进去的是最新的一条。
+        # Kivy 的 BoxLayout 会把"最后加入的"放在最上面，这样最新记录就在最上方，
+        # 不会被挤出可见区域（之前正是反着排，导致新记录被顶到看不见的地方）。
+        for stamp, label, text, raw_hex in visible:
             if text.strip():
                 shown = text
             else:
@@ -439,6 +442,10 @@ def clip_line(text, limit=LINE_LIMIT):
     return text[:limit - 1] + '…'
 
 
+# 某一项 AT 查询没有回复、或回复格式不对时，该行统一显示这个
+BAD_OUTPUT = '输出异常'
+
+
 class ModuleDiagRunner(object):
     """按节奏发送 AT 查询并收集回复（不依赖任何弹窗）。
 
@@ -446,9 +453,10 @@ class ModuleDiagRunner(object):
     固定高度标签（状态卡那一行）是已经验证过能显示的，所以结果直接写回主界面。
     """
 
-    def __init__(self, ble, on_update=None, on_done=None):
+    def __init__(self, ble, on_lines=None, on_progress=None, on_done=None):
         self._ble = ble
-        self._on_update = on_update
+        self._on_lines = on_lines
+        self._on_progress = on_progress
         self._on_done = on_done
         self._replies_text = []
         self._timer = None
@@ -460,9 +468,12 @@ class ModuleDiagRunner(object):
     def start(self):
         state, _message = self._ble.at_notify_state()
         if state != NOTIFY_SUBSCRIBED:
-            self._emit('模块诊断：AT 通道未订阅，请重连后再试')
+            self._progress('AT 未订阅')
+            self._emit_lines(['%s：%s' % (name, BAD_OUTPUT)
+                              for _key, name in AT_QUERY_LABELS])
             return False
-        self._emit('模块诊断：查询中…')
+        self._progress('诊断中…')
+        self._emit_lines(['%s：查询中…' % name for _key, name in AT_QUERY_LABELS])
         self._timer = Clock.schedule_interval(self._step, 0.35)
         return True
 
@@ -474,13 +485,13 @@ class ModuleDiagRunner(object):
     def _step(self, dt):
         self._elapsed += dt
         self._collect()
+        self._emit_lines()
         if self._sent < len(AT_QUERIES):
             query = AT_QUERIES[self._sent]
             self._sent += 1
             self._ble.send_command('', ESP32_AT_UUID,
                                    to_hex((query + '\r\n').encode('utf-8')))
-            self._emit('模块诊断：已发 %d/%d，已收 %d 字节'
-                       % (self._sent, len(AT_QUERIES), self._at_bytes))
+            self._progress('诊断中 %d/6' % self._sent)
             return
         if self._elapsed > len(AT_QUERIES) * 0.35 + 2.5:
             self.stop()
@@ -505,33 +516,45 @@ class ModuleDiagRunner(object):
                 return text
         return ''
 
+    def lines(self):
+        """6 行检验结果；某一项查不到或格式不对，该行显示"输出异常"。"""
+        out = []
+        for key, name in AT_QUERY_LABELS:
+            value = self.value_of(key)
+            if not value or not value.startswith(key + '='):
+                out.append('%s：%s' % (name, BAD_OUTPUT))
+            else:
+                out.append(clip_line('%s：%s' % (name, value.split(' OK')[0].strip()), 40))
+        return out
+
     def summary(self):
-        """一行结论：显示在主界面，并写进回传记录。"""
+        """一行总览（写进回传记录）。"""
         auth = self.value_of('AT+AUTH')
         status = self.value_of('AT+STATUS')
         if not auth and not status:
-            return '模块诊断：模块未回复 AT（已收 %d 字节）' % self._at_bytes
-        short_auth = auth.replace('AT+AUTH=', '').replace(' OK', '').strip() or '无回复'
-        short_status = status.replace('AT+STATUS=', '').replace(' OK', '').strip() or '无回复'
+            return '模块诊断全部%s（已收 %d 字节）' % (BAD_OUTPUT, self._at_bytes)
+        short_auth = auth.replace('AT+AUTH=', '').replace(' OK', '').strip() or BAD_OUTPUT
+        short_status = status.replace('AT+STATUS=', '').replace(' OK', '').strip() or BAD_OUTPUT
         return '模块诊断：鉴权=%s 状态显示=%s 收=%d字节' % (
             short_auth, short_status, self._at_bytes)
 
-    def detail_lines(self):
-        return [clip_line('%s：%s' % (label, self.value_of(key) or '（无回复）'))
-                for key, label in AT_QUERY_LABELS]
+    def _emit_lines(self, lines=None):
+        if self._on_lines is not None:
+            self._on_lines(self.lines() if lines is None else lines)
 
-    def _emit(self, text):
-        if self._on_update is not None:
-            self._on_update(clip_line(text))
+    def _progress(self, text):
+        if self._on_progress is not None:
+            self._on_progress(text)
 
     def _done(self):
         if self._finished:              # 防止重复收尾（重复写记录）
             return
         self._finished = True
+        self._emit_lines()
         summary = self.summary()
-        self._emit(summary)
+        self._progress('模块诊断')
         if self._on_done is not None:
-            self._on_done(summary, self.detail_lines())
+            self._on_done(summary, self.lines())
 
 
 # ----------------------------------------------------------------------
@@ -608,7 +631,7 @@ class MainScreen(Screen):
     connected = BooleanProperty(False)
     user_text = StringProperty('')
     reply_label = StringProperty('查看回传记录')
-    diag_line = StringProperty('模块诊断：未运行')
+    diag_button = StringProperty('模块诊断')
 
     def __init__(self, **kwargs):
         super(MainScreen, self).__init__(**kwargs)
@@ -742,28 +765,40 @@ class MainScreen(Screen):
     def run_module_diag(self):
         """模块诊断：走模块自带的 AT 通道读它自己的设置（不经过串口）。
 
-        结果**直接显示在主界面的固定高度标签上**（就是你手机上一向能正常显示的
-        那种标签，和状态卡同一套结构），同时写进「回传记录」作为第二条通道。
-        这样一来，诊断结果完全不依赖弹窗正文——那条路径在你手机上一直是空白的。
+        结果**固定显示在主界面上的 6 行标签**里（一行一项，不轮换、不弹窗），
+        用的是和状态卡/服务页绿字完全相同的那套写法；查不到或格式不对的行
+        会显示「输出异常」。同时写进「回传记录」作为第二条通道。
         """
         if not self.connected:
             show_info('未连接', '请先连接 BLE 设备，再做模块诊断。')
             return
         if self._diag is not None:
             self._diag.stop()
-        self._diag = ModuleDiagRunner(ble=App.get_running_app().ble,
-                                      on_update=self._set_diag_line,
-                                      on_done=self._on_diag_done)
+        self._diag = ModuleDiagRunner(
+            ble=App.get_running_app().ble,
+            on_lines=self._set_diag_lines,
+            on_progress=self._set_diag_progress,
+            on_done=self._on_diag_done)
         self._diag.start()
 
-    def _set_diag_line(self, text):
-        self.diag_line = text
+    def _set_diag_lines(self, lines):
+        """把 6 行检验结果写进主界面上 6 个固定高度标签。"""
+        for index, text in enumerate(lines[:6], start=1):
+            try:
+                label = self.ids['diag_%d' % index]
+            except Exception:                                   # noqa: BLE001
+                continue
+            label.text = clip_line(text, 40)
+
+    def _set_diag_progress(self, text):
+        self.diag_button = clip_line(text, 12)
 
     def _on_diag_done(self, summary, detail_lines):
-        self.diag_line = summary
-        self.add_record('模块诊断', summary)
+        # 先写明细、最后写结论：记录页按"最新的在上面"排列，
+        # 这样打开记录页第一眼看到的就是结论本身
         for line in detail_lines:
             self.add_record('模块诊断明细', line)
+        self.add_record('模块诊断', summary)
 
     def open_device_dialog(self):
         if self.connected:
