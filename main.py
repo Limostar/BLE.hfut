@@ -26,6 +26,8 @@ from kivy.uix.screenmanager import Screen, ScreenManager
 from kivy.utils import platform
 
 from accounts import AccountStore
+from protocol import (CMD_FUNC_1, MAX_PAYLOAD, REPLY_FUNC_1, RxFrameParser,
+                      build_frame, decode_text, to_hex)
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 KV_FILE = os.path.join(APP_DIR, 'ui.kv')
@@ -61,24 +63,31 @@ COLOR_DISABLED = [0.776, 0.839, 0.796, 1.0]
 # 不确定 UUID 时：先连接设备，再点界面上的「服务/特征」按钮，
 # 手机上会列出该设备暴露的全部服务与特征及其属性，
 # 找到属性里带 WRITE 的那一条，把它的 UUID 填到下面即可。
-ESP32_WRITE_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'   # 默认示例：Nordic UART 的 RX 特征
+ESP32_WRITE_UUID = 'beb5483e-36e1-4688-b7f5-ea07361b26a8'   # 默认示例：BLE_server 示例里的可写特征
 ESP32_SERVICE_UUID = ''
+
+# 回传（ESP32 → 手机）用的通知特征 UUID。
+# 填错也不要紧：会自动退化为"设备上第一个支持 NOTIFY 的特征"。
+ESP32_NOTIFY_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'
+ESP32_AUTO_PICK_NOTIFY = True
 
 # 调试开关：按上面的 UUID 找不到特征时，自动改用"设备上第一个可写特征"，
 # 这样第一次构建就能先跑通链路；弹窗里会显示它实际写到了哪个特征。
 # 正式使用时建议把这个改成 False，只允许写约定的那一个特征。
 ESP32_AUTO_PICK_WRITE = True
 
-# 各功能按钮对应的命令字（与 ESP32 固件约定）
-CMD_FUNC_1 = 0x01
+# 回传命令字 REPLY_FUNC_1、下发命令字 CMD_FUNC_1 都在 protocol.py 里约定
+
+# 通知订阅状态（与 ble_android.py / BleHelper.java 保持一致）
+NOTIFY_OFF, NOTIFY_SUBSCRIBING, NOTIFY_SUBSCRIBED, NOTIFY_FAILED = 0, 1, 2, 3
+
+# 各功能按钮对应的命令字见 protocol.py 的 CMD_FUNC_1
 
 # 命令帧格式：[0xAA][0x55][命令字][数据长度][数据...][异或校验]
-# 如果你们固件用的是别的格式，只需要改 build_frame() 这一个函数。
-FRAME_HEADER = (0xAA, 0x55)
+# 帧的拼装/解析实现在 protocol.py（两端共用的唯一实现），
+# 要换格式只改 protocol.py 里的 build_frame()，ESP32 端照着同步即可。
 
-# 单次写入的载荷上限：默认 MTU=23，减去 3 字节 ATT 头，即 20 字节。
-# 超过这个长度需要先协商 MTU 并分片，当前版本会明确提示而不是静默失败。
-MAX_PAYLOAD = 20
+# 单次写入的载荷上限（20 字节）见 protocol.py 的 MAX_PAYLOAD
 
 # 写入结果等待超时（秒）
 WRITE_TIMEOUT = 3.0
@@ -86,18 +95,9 @@ WRITE_TIMEOUT = 3.0
 WRITE_IDLE, WRITE_SENDING, WRITE_SUCCESS, WRITE_FAILED = 0, 1, 2, 3
 
 
-def build_frame(cmd, data=b''):
-    """按默认帧格式拼一条命令。要换格式就改这个函数。"""
-    payload = bytes(bytearray(data))
-    body = bytes(bytearray([cmd, len(payload)])) + payload
-    checksum = 0
-    for value in bytearray(body):
-        checksum ^= value
-    return bytes(bytearray(FRAME_HEADER)) + body + bytes(bytearray([checksum]))
+# 帧的拼装与解析统一在 protocol.py 里实现（App、桌面模拟器、测试脚本共用同一份，
+# 避免两边规则漂移），这里只做导入。要改帧格式就改 protocol.py 的 build_frame()。
 
-
-def to_hex(data):
-    return ''.join('%02X' % value for value in bytearray(data))
 
 
 def register_cjk_font():
@@ -361,10 +361,13 @@ class MainScreen(Screen):
     status_detail = StringProperty('点击下方「蓝牙连接」搜索附近的 BLE 设备')
     connected = BooleanProperty(False)
     user_text = StringProperty('')
+    reply_text = StringProperty('设备回传：暂无')
 
     def __init__(self, **kwargs):
         super(MainScreen, self).__init__(**kwargs)
         self._poll = None
+        self._parser = RxFrameParser()
+        self._notify_subscribed = False
 
     def on_enter(self, *args):
         app = App.get_running_app()
@@ -387,6 +390,47 @@ class MainScreen(Screen):
             self.status_detail = detail
         if connected != self.connected:
             self.connected = connected
+
+        self._keep_notify(ble, connected)
+        self._drain_incoming(ble)
+
+    # ------------------------------------------------------------------
+    # 回传（ESP32 → 手机）
+    # ------------------------------------------------------------------
+    def _keep_notify(self, ble, connected):
+        """连上就自动订阅回传通知；订阅幂等，没成功会在下一轮重试。"""
+        if not connected:
+            self._notify_subscribed = False
+            return
+        if self._notify_subscribed:
+            return
+        state, _message = ble.notify_state()
+        if state == NOTIFY_SUBSCRIBED:
+            self._notify_subscribed = True
+            return
+        if state == NOTIFY_SUBSCRIBING:
+            return
+        ble.enable_notify(ESP32_SERVICE_UUID, ESP32_NOTIFY_UUID,
+                          auto_pick=ESP32_AUTO_PICK_NOTIFY)
+
+    def _drain_incoming(self, ble):
+        chunks = ble.pop_received()
+        if not chunks:
+            return
+        data = bytearray()
+        for chunk in chunks:
+            try:
+                data.extend(bytearray.fromhex(str(chunk)))
+            except ValueError:
+                Logger.warning('BleAssistant: 收到非十六进制回传数据，已跳过')
+        for cmd, payload in self._parser.feed(data):
+            self._on_reply(cmd, payload)
+
+    def _on_reply(self, cmd, payload):
+        text = decode_text(payload)
+        self.reply_text = '设备回传（0x%02X）：%s' % (cmd, text)
+        Logger.info('BleAssistant: 收到回传 cmd=0x%02X 内容=%r', cmd, text)
+        show_info('收到 ESP32 回传', text)
 
     def open_device_dialog(self):
         if self.connected:

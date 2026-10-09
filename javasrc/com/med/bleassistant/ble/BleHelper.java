@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
@@ -295,6 +296,7 @@ public final class BleHelper {
                     writeState = WRITE_FAILED;
                     writeMessage = "connection lost before the write completed";
                 }
+                resetNotify();
             }
         }
 
@@ -324,6 +326,41 @@ public final class BleHelper {
             // One GATT operation at a time: send the next one only after
             // this one reported back.
             pumpWrites();
+        }
+
+        @Override
+        public void onDescriptorWrite(BluetoothGatt g, BluetoothGattDescriptor descriptor, int status) {
+            if (CCCD_UUID.equals(descriptor.getUuid())) {
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    notifyState = NOTIFY_SUBSCRIBED;
+                    notifyMessage = "subscribed to " + notifyTarget;
+                } else {
+                    notifyState = NOTIFY_FAILED;
+                    notifyMessage = "CCCD write failed, status=" + status;
+                }
+            }
+            synchronized (WRITE_LOCK) {
+                writing = false;
+            }
+            pumpWrites();
+        }
+
+        @Override
+        public void onCharacteristicChanged(BluetoothGatt g, BluetoothGattCharacteristic c) {
+            // Deprecated since API 33 but still invoked; the new overload below
+            // is the one used on Android 13+. Both are overridden on purpose.
+            byte[] value = null;
+            try {
+                value = c.getValue();
+            } catch (Throwable ignored) {
+            }
+            storeReceived(value);
+        }
+
+        @Override
+        public void onCharacteristicChanged(BluetoothGatt g, BluetoothGattCharacteristic c,
+                                            byte[] value) {
+            storeReceived(value);
         }
     };
 
@@ -365,6 +402,7 @@ public final class BleHelper {
         connState = CONN_DISCONNECTED;
         serviceCount = 0;
         resetWrites();
+        resetNotify();
     }
 
     // ------------------------------------------------------------------
@@ -621,6 +659,183 @@ public final class BleHelper {
             Log.w(TAG, "getServicesInfo: " + t);
         }
         return rows.toArray(new String[0]);
+    }
+
+    // ------------------------------------------------------------------
+    // GATT notify (uplink: device -> phone)
+    //
+    // Subscribing needs a CCCD (0x2902) descriptor write, which is another
+    // asynchronous GATT operation - hence the same serialization rule as
+    // the write queue above. Received bytes are buffered as hex strings and
+    // drained by Python, which owns the frame reassembly logic.
+    // ------------------------------------------------------------------
+    public static final int NOTIFY_OFF = 0;
+    public static final int NOTIFY_SUBSCRIBING = 1;
+    public static final int NOTIFY_SUBSCRIBED = 2;
+    public static final int NOTIFY_FAILED = 3;
+
+    private static final java.util.UUID CCCD_UUID =
+            java.util.UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
+    private static final int MAX_RECEIVED_CHUNKS = 64;
+
+    private static final Object RECEIVE_LOCK = new Object();
+    private static final Queue<String> RECEIVED = new LinkedList<String>();
+
+    private static volatile int notifyState = NOTIFY_OFF;
+    private static volatile String notifyMessage = "";
+    private static volatile String notifyTarget = "";
+    private static volatile int receivedChunks = 0;
+    private static volatile int receivedDropped = 0;
+
+    /**
+     * Subscribes to the notification characteristic (idempotent).
+     *
+     * @param autoPick fall back to the first notifiable characteristic when the
+     *                 configured UUID is empty or not found.
+     * @return an empty string when the subscription was started or already active,
+     *         otherwise the reason (usually "busy", which the caller retries).
+     */
+    public static String enableNotify(String serviceUuid, String charUuid, boolean autoPick) {
+        BluetoothGatt g = gatt;
+        if (g == null || connState != CONN_CONNECTED) {
+            return "device is not connected";
+        }
+        if (notifyState == NOTIFY_SUBSCRIBED) {
+            return "";
+        }
+        BluetoothGattCharacteristic characteristic = findCharacteristic(serviceUuid, charUuid);
+        if (characteristic == null && autoPick) {
+            characteristic = findFirstNotifiable();
+        }
+        if (characteristic == null) {
+            return "no notifiable characteristic found - check the UUID";
+        }
+        int properties = characteristic.getProperties();
+        boolean indicate = (properties & BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0;
+        if (!indicate && (properties & BluetoothGattCharacteristic.PROPERTY_NOTIFY) == 0) {
+            return "characteristic does not support notify, properties="
+                    + propertiesText(characteristic);
+        }
+
+        synchronized (WRITE_LOCK) {
+            if (writing) {
+                // A descriptor write is a GATT operation too: wait for the current one
+                return "busy with another GATT operation, will retry";
+            }
+            try {
+                if (!g.setCharacteristicNotification(characteristic, true)) {
+                    notifyState = NOTIFY_FAILED;
+                    notifyMessage = "setCharacteristicNotification() failed";
+                    return notifyMessage;
+                }
+                BluetoothGattDescriptor cccd = characteristic.getDescriptor(CCCD_UUID);
+                if (cccd == null) {
+                    // Some devices omit the CCCD; the local subscription is enough
+                    notifyTarget = characteristic.getUuid().toString();
+                    notifyState = NOTIFY_SUBSCRIBED;
+                    notifyMessage = "subscribed locally (the device has no CCCD descriptor)";
+                    return "";
+                }
+                cccd.setValue(indicate ? BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+                                       : BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                if (!g.writeDescriptor(cccd)) {
+                    notifyState = NOTIFY_FAILED;
+                    notifyMessage = "writeDescriptor() was rejected by the system";
+                    return notifyMessage;
+                }
+                writing = true;      // released in onDescriptorWrite()
+            } catch (Throwable t) {
+                Log.w(TAG, "enableNotify: " + t);
+                notifyState = NOTIFY_FAILED;
+                notifyMessage = "enableNotify threw: " + t;
+                return notifyMessage;
+            }
+        }
+        notifyTarget = characteristic.getUuid().toString();
+        notifyState = NOTIFY_SUBSCRIBING;
+        notifyMessage = "";
+        return "";
+    }
+
+    public static int getNotifyState() {
+        return notifyState;
+    }
+
+    public static String getNotifyMessage() {
+        return notifyMessage == null ? "" : notifyMessage;
+    }
+
+    /** UUID of the characteristic the uplink is subscribed to. */
+    public static String getNotifyTarget() {
+        return notifyTarget == null ? "" : notifyTarget;
+    }
+
+    public static int getReceivedDropped() {
+        return receivedDropped;
+    }
+
+    /**
+     * Drains the received chunks (each one a hex string) and clears the buffer.
+     * Python reassembles them into frames.
+     */
+    public static String[] popReceived() {
+        synchronized (RECEIVE_LOCK) {
+            if (RECEIVED.isEmpty()) {
+                return new String[0];
+            }
+            String[] out = RECEIVED.toArray(new String[0]);
+            RECEIVED.clear();
+            return out;
+        }
+    }
+
+    private static void storeReceived(byte[] value) {
+        if (value == null || value.length == 0) {
+            return;
+        }
+        StringBuilder hex = new StringBuilder(value.length * 2);
+        for (int i = 0; i < value.length; i++) {
+            hex.append(String.format("%02x", value[i] & 0xFF));
+        }
+        synchronized (RECEIVE_LOCK) {
+            if (RECEIVED.size() >= MAX_RECEIVED_CHUNKS) {
+                RECEIVED.poll();
+                receivedDropped++;
+            }
+            RECEIVED.add(hex.toString());
+        }
+        receivedChunks++;
+    }
+
+    private static void resetNotify() {
+        notifyState = NOTIFY_OFF;
+        notifyMessage = "";
+        notifyTarget = "";
+        synchronized (RECEIVE_LOCK) {
+            RECEIVED.clear();
+        }
+    }
+
+    /** First characteristic that supports notify or indicate (bring-up fallback). */
+    private static BluetoothGattCharacteristic findFirstNotifiable() {
+        BluetoothGatt g = gatt;
+        if (g == null) {
+            return null;
+        }
+        try {
+            for (BluetoothGattService service : g.getServices()) {
+                for (BluetoothGattCharacteristic c : service.getCharacteristics()) {
+                    int p = c.getProperties();
+                    if ((p & BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0
+                            || (p & BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0) {
+                        return c;
+                    }
+                }
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "findFirstNotifiable: " + t);
+        }
+        return null;
     }
 
     private static byte[] hexToBytes(String hex) {

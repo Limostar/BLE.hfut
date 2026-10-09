@@ -17,6 +17,7 @@ HELPER_CLASS = 'com.med.bleassistant.ble.BleHelper'
 SCAN_IDLE, SCAN_RUNNING, SCAN_FAILED = 0, 1, 2
 CONN_IDLE, CONN_CONNECTING, CONN_CONNECTED, CONN_DISCONNECTED, CONN_FAILED = 0, 1, 2, 3, 4
 WRITE_IDLE, WRITE_SENDING, WRITE_SUCCESS, WRITE_FAILED = 0, 1, 2, 3
+NOTIFY_OFF, NOTIFY_SUBSCRIBING, NOTIFY_SUBSCRIBED, NOTIFY_FAILED = 0, 1, 2, 3
 
 _SCAN_STATE_TEXT = {SCAN_IDLE: '空闲', SCAN_RUNNING: '扫描中', SCAN_FAILED: '失败'}
 
@@ -318,6 +319,48 @@ class AndroidBleManager(object):
                            'characteristic': parts[1],
                            'properties': parts[2]})
         return result
+
+    # ------------------------------------------------------------------
+    # 回传（ESP32 → 手机）：订阅通知 + 取回数据
+    # ------------------------------------------------------------------
+    def enable_notify(self, service_uuid, char_uuid, auto_pick=True):
+        """订阅通知特征（幂等，可重复调用）。返回 (是否受理, 提示)。"""
+        if not self.available:
+            return False, self._init_error or '蓝牙组件不可用'
+        try:
+            message = self._helper.enableNotify(service_uuid or '', char_uuid or '',
+                                                bool(auto_pick))
+        except Exception as exc:
+            Logger.exception('BleAssistant: 订阅通知失败')
+            return False, '订阅通知异常：%s' % exc
+        message = str(message or '')
+        if message:
+            return False, message
+        return True, ''
+
+    def notify_state(self):
+        """返回 (状态码, 说明)：0 未订阅 / 1 订阅中 / 2 已订阅 / 3 失败。"""
+        if not self.available:
+            return NOTIFY_OFF, ''
+        try:
+            return (int(self._helper.getNotifyState()),
+                    str(self._helper.getNotifyMessage() or ''))
+        except Exception:
+            return NOTIFY_OFF, ''
+
+    def pop_received(self):
+        """取出并清空已收到的回传数据，每项是一个十六进制字符串（一段字节流）。
+
+        用"取出即清空"而不是索引轮询，避免界面轮询频率变化导致漏读。
+        """
+        if not self.available:
+            return []
+        try:
+            raw = self._helper.popReceived()
+        except Exception:
+            Logger.exception('BleAssistant: 读取回传数据失败')
+            return []
+        return [str(item) for item in (raw or [])]
 
     # ------------------------------------------------------------------
     # 状态（供界面轮询）

@@ -7,9 +7,15 @@
 
 import time
 
+from protocol import REPLY_FUNC_1, build_frame, to_hex
+
 SCAN_IDLE, SCAN_RUNNING, SCAN_FAILED = 0, 1, 2
 CONN_IDLE, CONN_CONNECTING, CONN_CONNECTED, CONN_DISCONNECTED, CONN_FAILED = 0, 1, 2, 3, 4
 WRITE_IDLE, WRITE_SENDING, WRITE_SUCCESS, WRITE_FAILED = 0, 1, 2, 3
+NOTIFY_OFF, NOTIFY_SUBSCRIBING, NOTIFY_SUBSCRIBED, NOTIFY_FAILED = 0, 1, 2, 3
+
+# 模拟设备收到「功能一」后回传的内容（与 ESP32 端保持一致）
+SIM_REPLY_TEXT = 'Hello World'
 
 _FAKE_DEVICES = [
     ('MedPro 心率监测仪', 'C8:1F:66:0A:11:01', -46),
@@ -48,6 +54,8 @@ class SimulatedBleManager(object):
         self._write_message = ''
         self._write_length = 0
         self._write_target = ''
+        self._notify_state = NOTIFY_OFF
+        self._pending_received = []
 
     # ------------------------------------------------------------------
     # 扫描
@@ -140,8 +148,29 @@ class SimulatedBleManager(object):
         if time.monotonic() - self._write_started >= WRITE_DELAY:
             self._write_result = WRITE_SUCCESS
             self._write_message = 'wrote %d byte(s) successfully' % self._write_length
+            # 模拟 ESP32：写入成功后回传一帧（载荷就是给界面显示的文本）
+            if self._notify_state == NOTIFY_SUBSCRIBED:
+                self._pending_received.append(
+                    to_hex(build_frame(REPLY_FUNC_1, SIM_REPLY_TEXT.encode('utf-8'))))
             return self._write_result, self._write_message
         return WRITE_SENDING, ''
+
+    # ------------------------------------------------------------------
+    # 回传（桌面模拟：订阅即成功，写入成功后自动回一帧）
+    # ------------------------------------------------------------------
+    def enable_notify(self, service_uuid, char_uuid, auto_pick=True):
+        if not self._connected_address:
+            return False, 'device is not connected'
+        self._notify_state = NOTIFY_SUBSCRIBED
+        return True, ''
+
+    def notify_state(self):
+        return self._notify_state, ''
+
+    def pop_received(self):
+        chunks = self._pending_received
+        self._pending_received = []
+        return chunks
 
     def reset_writes(self):
         self._write_started = None
