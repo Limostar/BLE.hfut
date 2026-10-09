@@ -98,6 +98,17 @@
     height: dp(72)
     padding: dp(10), dp(6)
 
+<DiagRow>:
+    font_name: app.font_name
+    font_size: sp(11)
+    color: app.COLOR_TEXT
+    halign: 'left'
+    valign: 'middle'
+    text_size: self.size
+    size_hint_y: None
+    height: dp(24)
+    padding: dp(8), dp(2)
+
 <DeviceRow>:
     font_name: app.font_name
     font_size: sp(13)
@@ -485,26 +496,20 @@
     title_color: app.COLOR_PRIMARY_DARK
     separator_color: app.COLOR_LINE
     size_hint: 0.86, None
-    height: dp(300)
+    height: dp(320)
     BoxLayout:
         orientation: 'vertical'
         spacing: dp(12)
         padding: dp(4)
-        ScrollView:
-            id: info_scroll
-            do_scroll_x: False
-            bar_width: dp(3)
-            Label:
-                id: info_label
-                text: root.message
-                font_name: app.font_name
-                font_size: sp(13)
-                color: app.COLOR_TEXT
-                halign: 'left'
-                valign: 'top'
-                text_size: (info_scroll.width - dp(16)), None
-                size_hint_y: None
-                height: max(self.texture_size[1], dp(24))
+        Label:
+            id: info_label
+            text: root.message
+            font_name: app.font_name
+            font_size: sp(13)
+            color: app.COLOR_TEXT
+            halign: 'left'
+            valign: 'top'
+            text_size: self.size
         RoundButton:
             text: '知道了'
             on_release: root.dismiss()
@@ -727,36 +732,20 @@
     title_size: sp(15)
     title_color: app.COLOR_PRIMARY_DARK
     separator_color: app.COLOR_LINE
-    size_hint: 0.94, 0.78
+    size_hint: 0.94, 0.86
     BoxLayout:
         orientation: 'vertical'
         spacing: dp(8)
         padding: dp(4)
-        Label:
-            text: '这条通道只走蓝牙、不经过串口，用来读模块自身的设置'
-            font_name: app.font_name
-            font_size: sp(11)
-            color: app.COLOR_TEXT_WEAK
-            halign: 'left'
-            valign: 'middle'
-            text_size: self.size
-            size_hint_y: None
-            height: dp(22)
         ScrollView:
-            id: diag_scroll
             do_scroll_x: False
             bar_width: dp(3)
-            Label:
-                id: diag_label
-                text: root.result_text
-                font_name: app.font_name
-                font_size: sp(12)
-                color: app.COLOR_TEXT
-                halign: 'left'
-                valign: 'top'
-                text_size: (diag_scroll.width - dp(16)), None
+            GridLayout:
+                id: diag_list
+                cols: 1
+                spacing: dp(2)
                 size_hint_y: None
-                height: max(self.texture_size[1], dp(24))
+                height: self.minimum_height
         RoundButton:
             text: '关闭'
             font_size: sp(13)

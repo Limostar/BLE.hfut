@@ -146,12 +146,21 @@ class ReplyRow(Label):
     """回传记录列表中的一行。"""
 
 
+class DiagRow(Label):
+    """模块诊断输出中的一行。"""
+
+
 class RootWidget(ScreenManager):
     """承载三个页面。"""
 
 
 def show_info(title, message):
-    popup = InfoPopup(title=title, message=message)
+    # 弹窗正文现在是固定区域的普通标签（在安卓上最稳），过长会超出可见范围，
+    # 所以超出部分主动截断，避免"内容显示不全"看起来像坏了
+    text = message
+    if len(text) > 420:
+        text = text[:420] + '\n…（内容过长，已截断）'
+    popup = InfoPopup(title=title, message=text)
     popup.open()
     return popup
 
@@ -412,17 +421,19 @@ class ModuleDiagPopup(Popup):
         self._timer = None
         self._sent = 0
         self._elapsed = 0.0
+        self._at_bytes = 0
 
     def on_open(self, *args):
         super(ModuleDiagPopup, self).on_open(*args)
         state, message = self._ble.at_notify_state()
-        if state != NOTIFY_SUBSCRIBED:
-            self.result_text = ('AT 通道尚未订阅：%s（%s）\n\n'
-                                '请确认设备已连接，等 1~2 秒后重新打开本页。'
-                                % (_NOTIFY_STATE_TEXT.get(state, '未知'), message or '—'))
-            return
-        self._lines = ['AT 通道已订阅，开始查询模块设置…']
+        self._lines = ['查询项：%s' % '  '.join(AT_QUERIES)]
         self._refresh_text()
+        if state != NOTIFY_SUBSCRIBED:
+            self._lines.append('AT 通道未订阅：%s（%s）→ 请确认已连接设备，'
+                               '等 1~2 秒后重新打开本页'
+                               % (_NOTIFY_STATE_TEXT.get(state, '未知'), message or '—'))
+            self._refresh_text()
+            return
         self._timer = Clock.schedule_interval(self._step, 0.35)
 
     def on_dismiss(self, *args):
@@ -457,6 +468,7 @@ class ModuleDiagPopup(Popup):
                 raw = bytes(bytearray.fromhex(chunk))
             except ValueError:
                 continue
+            self._at_bytes += len(raw)
             text = raw.decode('utf-8', 'replace').replace('\r', '')
             for line in text.split('\n'):
                 line = line.strip()
@@ -465,7 +477,26 @@ class ModuleDiagPopup(Popup):
         self._refresh_text()
 
     def _refresh_text(self):
-        self.result_text = '\n'.join(self._lines[-60:])
+        """始终把状态放第一行，并按"一行一个固定高度标签"渲染。
+
+        用固定高度的小标签，而不是整块自适应高度的标签：后者在手机上经常
+        拿不到有效尺寸而显示为空白。服务列表/回传记录用的就是这种写法，已验证可用。
+        """
+        state, message = self._ble.at_notify_state()
+        lines = ['AT 订阅：%s（%s）    已收到 %d 字节'
+                 % (_NOTIFY_STATE_TEXT.get(state, '未知'), message or '—', self._at_bytes)]
+        if self._at_bytes == 0:
+            lines.append('（若长时间为 0 字节，说明模块没有通过 6E400004 回复）')
+        lines.extend(self._lines[-40:])
+        self.result_text = '\n'.join(lines)
+
+        try:
+            box = self.ids.diag_list
+        except Exception:                                       # noqa: BLE001
+            return
+        box.clear_widgets()
+        for line in lines:
+            box.add_widget(DiagRow(text=line))
 
 
 # ----------------------------------------------------------------------
