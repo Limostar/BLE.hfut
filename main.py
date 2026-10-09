@@ -373,8 +373,12 @@ class ReplyHistoryPopup(Popup):
                      '连接设备后点「功能一」，设备回传的内容会记录在这里。'))
             return
         # 最新的排在最上面
-        for stamp, cmd, text in reversed(self._history):
-            box.add_widget(ReplyRow(text='%s    命令字 0x%02X\n%s' % (stamp, cmd, text)))
+        for stamp, cmd, text, raw_hex in reversed(self._history):
+            box.add_widget(ReplyRow(
+                text='%s    命令字 0x%02X    载荷 %d 字节\n文字：%s\n原始：%s'
+                     % (stamp, cmd, len(raw_hex) // 2,
+                        text if text.strip() else '（空或不可见）',
+                        raw_hex or '（空）')))
 
 
 # ----------------------------------------------------------------------
@@ -525,17 +529,26 @@ class MainScreen(Screen):
             self._on_reply(cmd, payload)
 
     def _on_reply(self, cmd, payload):
+        raw = bytes(bytearray(payload))
+        raw_hex = to_hex(raw)
         text = decode_text(payload)
-        self._replies.append((time.strftime('%H:%M:%S'), cmd, text))
+        self._replies.append((time.strftime('%H:%M:%S'), cmd, text, raw_hex))
         self.reply_label = '查看回传记录（%d）' % len(self._replies)
-        Logger.info('BleAssistant: 收到回传 cmd=0x%02X 内容=%r', cmd, text)
-        show_info('收到设备回传', text)
+        Logger.info('BleAssistant: 收到回传 cmd=0x%02X 载荷=%r 原始=%s', cmd, text, raw_hex)
+
+        # 载荷为空或全是不可见字符时，直接把原始字节显示出来，
+        # 避免出现"弹窗有、内容空"这种查不下去的情况
+        if text.strip():
+            body = text
+        else:
+            body = '载荷不是可显示文字。\n原始字节：%s' % (raw_hex or '（空）')
+        show_info('收到设备回传（0x%02X，%d 字节）' % (cmd, len(raw)), body)
 
     # ------------------------------------------------------------------
     # 回传记录（本次登录期间）
     # ------------------------------------------------------------------
     def replies(self):
-        """返回本次登录收到的回传列表 [(时间, 命令字, 文本), ...]。"""
+        """返回本次登录收到的回传列表 [(时间, 命令字, 文字, 原始hex), ...]。"""
         return list(self._replies)
 
     def clear_replies(self):
