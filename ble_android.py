@@ -391,6 +391,17 @@ class AndroidBleManager(object):
     # ------------------------------------------------------------------
     # 状态（供界面轮询）
     # ------------------------------------------------------------------
+    def _notify_text(self):
+        """回传订阅状态的短文本，直接显示在连接状态卡上。"""
+        try:
+            state = int(self._helper.getNotifyState())
+        except Exception:
+            return '回传状态未知'
+        return {NOTIFY_OFF: '回传未订阅',
+                NOTIFY_SUBSCRIBING: '回传订阅中',
+                NOTIFY_SUBSCRIBED: '回传已订阅',
+                NOTIFY_FAILED: '回传订阅失败'}.get(state, '回传状态未知')
+
     def status(self):
         """返回 (标题, 详情, 是否已连接)。"""
         if not self.available:
@@ -408,7 +419,7 @@ class AndroidBleManager(object):
             name = self._helper.getConnectedName() or '未命名设备'
             address = self._helper.getConnectedAddress() or '-'
             services = int(self._helper.getServiceCount())
-            detail = '%s\n%s · 服务 %d 个' % (name, address, services)
+            detail = '%s\n%s · 服务 %d 个 · %s' % (name, address, services, self._notify_text())
             return '已连接', detail, True
 
         if conn == CONN_CONNECTING:

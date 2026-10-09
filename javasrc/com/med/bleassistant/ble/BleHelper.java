@@ -719,6 +719,9 @@ public final class BleHelper {
         }
         try {
             for (BluetoothGattService service : g.getServices()) {
+                if (isStandardService(service)) {
+                    continue;
+                }
                 for (BluetoothGattCharacteristic c : service.getCharacteristics()) {
                     if (isWritable(c)) {
                         return c;
@@ -729,6 +732,17 @@ public final class BleHelper {
             Log.w(TAG, "findFirstWritable: " + t);
         }
         return null;
+    }
+
+    /**
+     * Skipping the standard SIG services matters: Generic Access (0x1800) holds
+     * the Device Name characteristic (0x2A00), which is writable. Auto-picking it
+     * makes a command look delivered while the device never sees it on its own
+     * application characteristic.
+     */
+    private static boolean isStandardService(BluetoothGattService service) {
+        String uuid = service.getUuid().toString().toLowerCase();
+        return uuid.startsWith("00001800") || uuid.startsWith("00001801");
     }
 
     private static boolean isWritable(BluetoothGattCharacteristic c) {
@@ -950,6 +964,9 @@ public final class BleHelper {
         }
         try {
             for (BluetoothGattService service : g.getServices()) {
+                if (isStandardService(service)) {
+                    continue;
+                }
                 for (BluetoothGattCharacteristic c : service.getCharacteristics()) {
                     int p = c.getProperties();
                     if ((p & BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0

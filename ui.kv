@@ -471,19 +471,24 @@
     title_color: app.COLOR_PRIMARY_DARK
     separator_color: app.COLOR_LINE
     size_hint: 0.86, None
-    height: dp(200)
+    height: dp(280)
     BoxLayout:
         orientation: 'vertical'
         spacing: dp(12)
         padding: dp(4)
-        Label:
-            text: root.message
-            font_name: app.font_name
-            font_size: sp(14)
-            color: app.COLOR_TEXT
-            halign: 'center'
-            valign: 'middle'
-            text_size: self.size
+        ScrollView:
+            do_scroll_x: False
+            bar_width: dp(3)
+            Label:
+                text: root.message
+                font_name: app.font_name
+                font_size: sp(13)
+                color: app.COLOR_TEXT
+                halign: 'left'
+                valign: 'top'
+                text_size: self.width, None
+                size_hint_y: None
+                height: self.texture_size[1] + dp(4)
         RoundButton:
             text: '知道了'
             on_release: root.dismiss()
@@ -627,7 +632,7 @@
             valign: 'top'
             text_size: self.size
             size_hint_y: None
-            height: dp(32)
+            height: dp(46)
         ScrollView:
             do_scroll_x: False
             bar_width: dp(3)

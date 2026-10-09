@@ -63,23 +63,26 @@ COLOR_DISABLED = [0.776, 0.839, 0.796, 1.0]
 # 不确定 UUID 时：先连接设备，再点界面上的「服务/特征」按钮，
 # 手机上会列出该设备暴露的全部服务与特征及其属性，
 # 找到属性里带 WRITE 的那一条，把它的 UUID 填到下面即可。
-ESP32_WRITE_UUID = 'beb5483e-36e1-4688-b7f5-ea07361b26a8'   # 默认示例：BLE_server 示例里的可写特征
+ESP32_WRITE_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'   # 必须等于 sketch 里的 CHAR_RX_UUID
 ESP32_SERVICE_UUID = ''
 
-# 回传（ESP32 → 手机）用的通知特征 UUID。
-# 填错也不要紧：会自动退化为"设备上第一个支持 NOTIFY 的特征"。
+# 回传（ESP32 → 手机）用的通知特征 UUID。必须等于 sketch 里的 CHAR_TX_UUID。
 ESP32_NOTIFY_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'
-ESP32_AUTO_PICK_NOTIFY = True
 
-# 调试开关：按上面的 UUID 找不到特征时，自动改用"设备上第一个可写特征"，
-# 这样第一次构建就能先跑通链路；弹窗里会显示它实际写到了哪个特征。
-# 正式使用时建议把这个改成 False，只允许写约定的那一个特征。
-ESP32_AUTO_PICK_WRITE = True
+# 自动兜底开关：默认关闭（要确定性）。
+# 打开它意味着"按 UUID 找不到就随便挑一个可写的特征"——曾经因为安卓 GATT 表里
+# Generic Access 的 Device Name(2A00) 也是可写的，命令被写进了设备名里，
+# 出现"App 显示发送成功、但设备串口毫无反应"的假成功。别开。
+# 如果 UUID 填错，App 会直接告诉你设备上实际有哪些可写/可通知特征。
+ESP32_AUTO_PICK_WRITE = False
+ESP32_AUTO_PICK_NOTIFY = False
 
 # 回传命令字 REPLY_FUNC_1、下发命令字 CMD_FUNC_1 都在 protocol.py 里约定
 
 # 通知订阅状态（与 ble_android.py / BleHelper.java 保持一致）
 NOTIFY_OFF, NOTIFY_SUBSCRIBING, NOTIFY_SUBSCRIBED, NOTIFY_FAILED = 0, 1, 2, 3
+_NOTIFY_STATE_TEXT = {NOTIFY_OFF: '未订阅', NOTIFY_SUBSCRIBING: '订阅中',
+                      NOTIFY_SUBSCRIBED: '已订阅', NOTIFY_FAILED: '订阅失败'}
 
 # 各功能按钮对应的命令字见 protocol.py 的 CMD_FUNC_1
 
@@ -281,7 +284,11 @@ class ServicesPopup(Popup):
 
     def refresh_list(self):
         count, message = self._ble.discovery_state()
-        self.ids.service_state.text = '已发现服务 %d 个 · %s' % (count, message or '—')
+        notify_state, notify_message = self._ble.notify_state()
+        self.ids.service_state.text = (
+            '已发现服务 %d 个 · %s\n回传订阅：%s（%s）'
+            % (count, message or '—',
+               _NOTIFY_STATE_TEXT.get(notify_state, '未知'), notify_message or '—'))
 
         box = self.ids.service_list
         box.clear_widgets()
@@ -507,11 +514,46 @@ class MainScreen(Screen):
                                                  ESP32_WRITE_UUID,
                                                  hex_data,
                                                  auto_pick=ESP32_AUTO_PICK_WRITE)
+        if not accepted:
+            # 失败时直接把设备上实际可用的特征列出来，省掉一轮试错
+            show_info('命令下发失败', '%s\n\n%s' % (message, self._feature_hint(app.ble)))
+            return
+
         CommandPopup(ble=app.ble,
                      command_name='功能一',
                      frame_hex=hex_data,
                      accepted=accepted,
                      message=message).open()
+
+    def _feature_hint(self, ble):
+        """列出设备上可写 / 可通知的特征，UUID 填错时一眼知道该填什么。"""
+        writable = []
+        notify_able = []
+        for item in ble.services_info():
+            uuid = item['characteristic']
+            if not uuid:
+                continue
+            properties = item['properties'] or ''
+            if 'WRITE' in properties:
+                writable.append(uuid)
+            if 'NOTIFY' in properties or 'INDICATE' in properties:
+                notify_able.append(uuid)
+
+        lines = ['App 里配置的写入特征：%s' % ESP32_WRITE_UUID,
+                 'App 里配置的通知特征：%s' % ESP32_NOTIFY_UUID,
+                 '',
+                 '设备上可写的特征：']
+        if writable:
+            lines.extend('  %s' % uuid for uuid in writable)
+        else:
+            lines.append('  （无）')
+        lines.append('')
+        lines.append('设备上可通知的特征：')
+        if notify_able:
+            lines.extend('  %s' % uuid for uuid in notify_able)
+        else:
+            lines.append('  （无）')
+        return '\n'.join(lines)
 
     def logout(self):
         App.get_running_app().logout()
