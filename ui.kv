@@ -87,6 +87,17 @@
     height: dp(52)
     padding: dp(8), dp(4)
 
+<ReplyRow>:
+    font_name: app.font_name
+    font_size: sp(13)
+    color: app.COLOR_TEXT
+    halign: 'left'
+    valign: 'middle'
+    text_size: self.size
+    size_hint_y: None
+    height: dp(52)
+    padding: dp(10), dp(6)
+
 <DeviceRow>:
     font_name: app.font_name
     font_size: sp(13)
@@ -379,16 +390,12 @@
                             valign: 'middle'
                             text_size: self.size
 
-            Label:
-                text: root.reply_text
-                font_name: app.font_name
-                font_size: sp(11)
-                color: app.COLOR_PRIMARY_DARK if root.reply_text != '设备回传：暂无' else app.COLOR_TEXT_WEAK
-                halign: 'left'
-                valign: 'middle'
-                text_size: self.size
+            RoundButton:
+                text: root.reply_label
+                font_size: sp(12)
                 size_hint_y: None
-                height: dp(22)
+                height: dp(38)
+                on_release: root.open_reply_dialog()
 
             BoxLayout:
                 orientation: 'horizontal'
@@ -658,4 +665,49 @@
             RoundButton:
                 text: '关闭'
                 font_size: sp(12)
+                on_release: root.dismiss()
+
+<ReplyHistoryPopup>:
+    title: '设备回传记录'
+    title_font: app.font_name
+    title_size: sp(16)
+    title_color: app.COLOR_PRIMARY_DARK
+    separator_color: app.COLOR_LINE
+    size_hint: 0.92, 0.7
+    BoxLayout:
+        orientation: 'vertical'
+        spacing: dp(8)
+        padding: dp(4)
+        Label:
+            id: reply_state
+            text: '本次登录共收到 0 条回传'
+            font_name: app.font_name
+            font_size: sp(12)
+            color: app.COLOR_TEXT_WEAK
+            halign: 'left'
+            valign: 'middle'
+            text_size: self.size
+            size_hint_y: None
+            height: dp(24)
+        ScrollView:
+            do_scroll_x: False
+            bar_width: dp(3)
+            GridLayout:
+                id: reply_list
+                cols: 1
+                spacing: dp(6)
+                size_hint_y: None
+                height: self.minimum_height
+        BoxLayout:
+            orientation: 'horizontal'
+            spacing: dp(10)
+            size_hint_y: None
+            height: dp(44)
+            RoundButton:
+                text: '清空记录'
+                font_size: sp(13)
+                on_release: root.clear_history()
+            RoundButton:
+                text: '关闭'
+                font_size: sp(13)
                 on_release: root.dismiss()

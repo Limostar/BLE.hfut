@@ -10,6 +10,7 @@
 """
 
 import os
+import time
 
 from kivy.app import App
 from kivy.clock import Clock
@@ -133,6 +134,10 @@ class DeviceRow(Button):
 
 class ServiceRow(Label):
     """服务 / 特征列表中的一行。"""
+
+
+class ReplyRow(Label):
+    """回传记录列表中的一行。"""
 
 
 class RootWidget(ScreenManager):
@@ -338,6 +343,41 @@ class ServicesPopup(Popup):
 
 
 # ----------------------------------------------------------------------
+# 回传记录
+# ----------------------------------------------------------------------
+class ReplyHistoryPopup(Popup):
+    """本次登录期间收到的设备回传记录（可滑动查看）。"""
+
+    def __init__(self, history, on_clear=None, **kwargs):
+        super(ReplyHistoryPopup, self).__init__(**kwargs)
+        self._history = list(history)
+        self._on_clear = on_clear
+
+    def on_open(self, *args):
+        super(ReplyHistoryPopup, self).on_open(*args)
+        self.refresh_list()
+
+    def clear_history(self):
+        if self._on_clear is not None:
+            self._on_clear()
+        self._history = []
+        self.refresh_list()
+
+    def refresh_list(self):
+        self.ids.reply_state.text = '本次登录共收到 %d 条回传' % len(self._history)
+        box = self.ids.reply_list
+        box.clear_widgets()
+        if not self._history:
+            box.add_widget(ReplyRow(
+                text='本次还没有收到设备回传。\n'
+                     '连接设备后点「功能一」，设备回传的内容会记录在这里。'))
+            return
+        # 最新的排在最上面
+        for stamp, cmd, text in reversed(self._history):
+            box.add_widget(ReplyRow(text='%s    命令字 0x%02X\n%s' % (stamp, cmd, text)))
+
+
+# ----------------------------------------------------------------------
 # 页面
 # ----------------------------------------------------------------------
 class LoginScreen(Screen):
@@ -410,17 +450,20 @@ class MainScreen(Screen):
     status_detail = StringProperty('点击下方「蓝牙连接」搜索附近的 BLE 设备')
     connected = BooleanProperty(False)
     user_text = StringProperty('')
-    reply_text = StringProperty('设备回传：暂无')
+    reply_label = StringProperty('查看回传记录')
 
     def __init__(self, **kwargs):
         super(MainScreen, self).__init__(**kwargs)
         self._poll = None
         self._parser = RxFrameParser()
         self._notify_subscribed = False
+        self._replies = []          # 本次登录期间收到的设备回传
 
     def on_enter(self, *args):
         app = App.get_running_app()
         self.user_text = '当前用户：%s' % (app.current_user or '-')
+        # 每次进入本页都代表一次新的登录，先把上一次的回传记录清空
+        self.clear_replies()
         self._refresh(0)
         if self._poll is None:
             self._poll = Clock.schedule_interval(self._refresh, 0.4)
@@ -483,9 +526,29 @@ class MainScreen(Screen):
 
     def _on_reply(self, cmd, payload):
         text = decode_text(payload)
-        self.reply_text = '设备回传（0x%02X）：%s' % (cmd, text)
+        self._replies.append((time.strftime('%H:%M:%S'), cmd, text))
+        self.reply_label = '查看回传记录（%d）' % len(self._replies)
         Logger.info('BleAssistant: 收到回传 cmd=0x%02X 内容=%r', cmd, text)
-        show_info('收到 ESP32 回传', text)
+        show_info('收到设备回传', text)
+
+    # ------------------------------------------------------------------
+    # 回传记录（本次登录期间）
+    # ------------------------------------------------------------------
+    def replies(self):
+        """返回本次登录收到的回传列表 [(时间, 命令字, 文本), ...]。"""
+        return list(self._replies)
+
+    def clear_replies(self):
+        """清空回传记录。
+
+        登录进入本页、退出登录、以及界面上的「清空记录」都会走这里，
+        所以不会出现"还显示上次那条 Hello World"的情况。
+        """
+        self._replies = []
+        self.reply_label = '查看回传记录'
+
+    def open_reply_dialog(self):
+        ReplyHistoryPopup(history=self.replies(), on_clear=self.clear_replies).open()
 
     def open_device_dialog(self):
         if self.connected:
@@ -584,6 +647,7 @@ class MainScreen(Screen):
         return '\n'.join(lines)
 
     def logout(self):
+        self.clear_replies()
         App.get_running_app().logout()
 
 
