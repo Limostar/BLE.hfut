@@ -89,25 +89,23 @@
 
 <ReplyRow>:
     font_name: app.font_name
-    font_size: sp(12)
+    font_size: sp(11)
     color: app.COLOR_TEXT
     halign: 'left'
-    valign: 'middle'
+    valign: 'top'
     text_size: self.size
     size_hint_y: None
-    height: dp(72)
-    padding: dp(10), dp(6)
+    height: dp(52)
 
 <PopupRow>:
     font_name: app.font_name
     font_size: sp(11)
-    color: app.COLOR_TEXT
+    color: app.COLOR_PRIMARY_DARK
     halign: 'left'
-    valign: 'middle'
+    valign: 'top'
     text_size: self.size
     size_hint_y: None
-    height: dp(28)
-    padding: dp(8), dp(3)
+    height: dp(40)
 
 <DeviceRow>:
     font_name: app.font_name
@@ -413,7 +411,21 @@
                 RoundButton:
                     text: '模块诊断'
                     font_size: sp(12)
-                    on_release: root.open_diag_dialog()
+                    on_release: root.run_module_diag()
+
+            # 模块诊断结果直接显示在这里（和状态卡同一套固定高度标签，
+            # 是已经在手机上验证过能正常显示的写法；不依赖弹窗正文）
+            Label:
+                id: diag_label
+                text: root.diag_line
+                font_name: app.font_name
+                font_size: sp(11)
+                color: app.COLOR_PRIMARY_DARK
+                halign: 'left'
+                valign: 'middle'
+                text_size: self.size
+                size_hint_y: None
+                height: dp(22)
 
             BoxLayout:
                 orientation: 'horizontal'
@@ -496,20 +508,15 @@
     title_color: app.COLOR_PRIMARY_DARK
     separator_color: app.COLOR_LINE
     size_hint: 0.88, None
-    height: dp(380)
+    height: dp(420)
     BoxLayout:
         orientation: 'vertical'
-        spacing: dp(10)
+        spacing: dp(2)
         padding: dp(4)
-        ScrollView:
-            do_scroll_x: False
-            bar_width: dp(3)
-            GridLayout:
-                id: info_lines
-                cols: 1
-                spacing: dp(2)
-                size_hint_y: None
-                height: self.minimum_height
+        BoxLayout:
+            id: info_lines
+            orientation: 'vertical'
+            spacing: dp(2)
         RoundButton:
             text: '知道了'
             on_release: root.dismiss()
@@ -687,31 +694,26 @@
     title_size: sp(16)
     title_color: app.COLOR_PRIMARY_DARK
     separator_color: app.COLOR_LINE
-    size_hint: 0.92, 0.7
+    size_hint: 0.94, 0.82
     BoxLayout:
         orientation: 'vertical'
-        spacing: dp(8)
+        spacing: dp(2)
         padding: dp(4)
         Label:
             id: reply_state
             text: '本次登录共收到 0 条回传'
             font_name: app.font_name
-            font_size: sp(12)
-            color: app.COLOR_TEXT_WEAK
+            font_size: sp(11)
+            color: app.COLOR_PRIMARY_DARK
             halign: 'left'
-            valign: 'middle'
+            valign: 'top'
             text_size: self.size
             size_hint_y: None
-            height: dp(24)
-        ScrollView:
-            do_scroll_x: False
-            bar_width: dp(3)
-            GridLayout:
-                id: reply_list
-                cols: 1
-                spacing: dp(6)
-                size_hint_y: None
-                height: self.minimum_height
+            height: dp(46)
+        BoxLayout:
+            id: reply_list
+            orientation: 'vertical'
+            spacing: dp(2)
         BoxLayout:
             orientation: 'horizontal'
             spacing: dp(10)
@@ -725,28 +727,3 @@
                 text: '关闭'
                 font_size: sp(13)
                 on_release: root.dismiss()
-
-<ModuleDiagPopup>:
-    title: '模块诊断（AT 指令通道）'
-    title_font: app.font_name
-    title_size: sp(15)
-    title_color: app.COLOR_PRIMARY_DARK
-    separator_color: app.COLOR_LINE
-    size_hint: 0.94, 0.86
-    BoxLayout:
-        orientation: 'vertical'
-        spacing: dp(8)
-        padding: dp(4)
-        ScrollView:
-            do_scroll_x: False
-            bar_width: dp(3)
-            GridLayout:
-                id: diag_list
-                cols: 1
-                spacing: dp(2)
-                size_hint_y: None
-                height: self.minimum_height
-        RoundButton:
-            text: '关闭'
-            font_size: sp(13)
-            on_release: root.dismiss()
