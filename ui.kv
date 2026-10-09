@@ -98,7 +98,7 @@
     height: dp(72)
     padding: dp(10), dp(6)
 
-<DiagRow>:
+<PopupRow>:
     font_name: app.font_name
     font_size: sp(11)
     color: app.COLOR_TEXT
@@ -106,8 +106,8 @@
     valign: 'middle'
     text_size: self.size
     size_hint_y: None
-    height: dp(24)
-    padding: dp(8), dp(2)
+    height: dp(28)
+    padding: dp(8), dp(3)
 
 <DeviceRow>:
     font_name: app.font_name
@@ -495,21 +495,21 @@
     title_size: sp(16)
     title_color: app.COLOR_PRIMARY_DARK
     separator_color: app.COLOR_LINE
-    size_hint: 0.86, None
-    height: dp(320)
+    size_hint: 0.88, None
+    height: dp(380)
     BoxLayout:
         orientation: 'vertical'
-        spacing: dp(12)
+        spacing: dp(10)
         padding: dp(4)
-        Label:
-            id: info_label
-            text: root.message
-            font_name: app.font_name
-            font_size: sp(13)
-            color: app.COLOR_TEXT
-            halign: 'left'
-            valign: 'top'
-            text_size: self.size
+        ScrollView:
+            do_scroll_x: False
+            bar_width: dp(3)
+            GridLayout:
+                id: info_lines
+                cols: 1
+                spacing: dp(2)
+                size_hint_y: None
+                height: self.minimum_height
         RoundButton:
             text: '知道了'
             on_release: root.dismiss()

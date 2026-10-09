@@ -146,8 +146,13 @@ class ReplyRow(Label):
     """回传记录列表中的一行。"""
 
 
-class DiagRow(Label):
-    """模块诊断输出中的一行。"""
+class PopupRow(Label):
+    """弹窗正文的一行。
+
+    重要：弹窗里的文字一律用"一行一个固定高度标签"来渲染。
+    这种写法在你的手机上已验证可正常显示（服务列表、回传记录都是它）；
+    而"整块高度跟着文字纹理自适应"的标签在手机上会拿不到有效尺寸，显示成空白。
+    """
 
 
 class RootWidget(ScreenManager):
@@ -155,18 +160,31 @@ class RootWidget(ScreenManager):
 
 
 def show_info(title, message):
-    # 弹窗正文现在是固定区域的普通标签（在安卓上最稳），过长会超出可见范围，
-    # 所以超出部分主动截断，避免"内容显示不全"看起来像坏了
+    # 正文按行渲染（每行一个固定高度标签）。超过可见范围的部分主动截断，
+    # 避免"内容显示不全"看起来像坏了。
     text = message
-    if len(text) > 420:
-        text = text[:420] + '\n…（内容过长，已截断）'
+    if len(text) > 600:
+        text = text[:600] + '\n…（内容过长，已截断）'
     popup = InfoPopup(title=title, message=text)
     popup.open()
     return popup
 
 
 class InfoPopup(Popup):
-    message = StringProperty('')
+    """提示弹窗：正文一行一个固定高度标签。"""
+
+    def __init__(self, title='', message='', **kwargs):
+        super(InfoPopup, self).__init__(title=title, **kwargs)
+        self.set_message(message)
+
+    def set_message(self, message):
+        try:
+            box = self.ids.info_lines
+        except Exception:                                       # noqa: BLE001
+            return
+        box.clear_widgets()
+        for line in (message or '').split('\n'):
+            box.add_widget(PopupRow(text=clip_line(line)))
 
 
 class DevicePopup(Popup):
@@ -387,22 +405,34 @@ class ReplyHistoryPopup(Popup):
                 text='本次还没有收到设备回传。\n'
                      '连接设备后点「功能一」，设备回传的内容会记录在这里。'))
             return
-        # 最新的排在最上面。
-        # 每条只占两行：行高固定时多行会被裁掉（手机上字体放大后更明显），
-        # 所以原始字节只在"文字为空"时才内联显示，避免挤成三行。
-        for stamp, cmd, text, raw_hex in reversed(self._history):
+        # 最新的排在最上面。每条两行：行高固定时多行会被裁掉。
+        for stamp, label, text, raw_hex in reversed(self._history):
             if text.strip():
                 shown = text
             else:
                 shown = '（空或不可见，原始：%s）' % (raw_hex or '空')
-            box.add_widget(ReplyRow(text='%s    命令字 0x%02X · %d 字节\n%s'
-                                         % (stamp, cmd, len(raw_hex) // 2, shown)))
+            box.add_widget(ReplyRow(text='%s    %s\n%s'
+                                         % (stamp, clip_line(label, 40), shown)))
 
 
 # ----------------------------------------------------------------------
 # 模块诊断（AT 指令通道，只走蓝牙）
 # ----------------------------------------------------------------------
 AT_QUERIES = ['AT+VERSION?', 'AT+ROLE?', 'AT+UART?', 'AT+STATUS?', 'AT+AUTH?', 'AT+NAME?']
+
+AT_QUERY_LABELS = (('AT+VERSION', '固件版本'), ('AT+ROLE', '设备角色'),
+                   ('AT+UART', '串口波特率'), ('AT+STATUS', '状态显示'),
+                   ('AT+AUTH', '用户鉴权'), ('AT+NAME', '设备名称'))
+
+# 每行最多这么多字符：保证一行放得下、不会被折行后截掉（手机上字体被放大也不会出问题）
+LINE_LIMIT = 40
+
+
+def clip_line(text, limit=LINE_LIMIT):
+    """把过长的行截断，保证"一行一个固定高度标签"永远放得下。"""
+    if len(text) <= limit:
+        return text
+    return text[:limit - 1] + '…'
 
 
 class ModuleDiagPopup(Popup):
@@ -414,25 +444,27 @@ class ModuleDiagPopup(Popup):
 
     result_text = StringProperty('')
 
-    def __init__(self, ble, **kwargs):
+    def __init__(self, ble, on_result=None, **kwargs):
         super(ModuleDiagPopup, self).__init__(**kwargs)
         self._ble = ble
-        self._lines = []
+        self._on_result = on_result
+        self._replies_text = []
         self._timer = None
         self._sent = 0
         self._elapsed = 0.0
         self._at_bytes = 0
+        self._done = False
 
     def on_open(self, *args):
         super(ModuleDiagPopup, self).on_open(*args)
-        state, message = self._ble.at_notify_state()
-        self._lines = ['查询项：%s' % '  '.join(AT_QUERIES)]
-        self._refresh_text()
+        self._refresh()
+
+    def start(self):
+        """由界面在弹出后立刻调用（Kivy 的 on_open 会延迟 0.5~1 秒才派发）。"""
+        state, _message = self._ble.at_notify_state()
         if state != NOTIFY_SUBSCRIBED:
-            self._lines.append('AT 通道未订阅：%s（%s）→ 请确认已连接设备，'
-                               '等 1~2 秒后重新打开本页'
-                               % (_NOTIFY_STATE_TEXT.get(state, '未知'), message or '—'))
-            self._refresh_text()
+            self._stop()
+            self._refresh()
             return
         self._timer = Clock.schedule_interval(self._step, 0.35)
 
@@ -451,16 +483,22 @@ class ModuleDiagPopup(Popup):
         if self._sent < len(AT_QUERIES):
             query = AT_QUERIES[self._sent]
             self._sent += 1
-            self._lines.append('>> %s' % query)
-            self._refresh_text()
+            self._refresh()
             # 写操作由 GATT 队列串行化，不用自己再加间隔
             self._ble.send_command('', ESP32_AT_UUID,
                                    to_hex((query + '\r\n').encode('utf-8')))
             return
-        if self._elapsed > len(AT_QUERIES) * 0.35 + 3.0:
-            self._lines.append('查询结束，把这里的内容截图发我即可。')
-            self._refresh_text()
-            self._stop()
+        if self._elapsed > len(AT_QUERIES) * 0.35 + 2.5:
+            self._finish()
+
+    def _finish(self):
+        if self._done:
+            return
+        self._done = True
+        self._stop()
+        self._refresh()
+        if self._on_result is not None:
+            self._on_result(self.verdict())
 
     def _collect_replies(self):
         for chunk in self._ble.pop_received_at():
@@ -473,30 +511,51 @@ class ModuleDiagPopup(Popup):
             for line in text.split('\n'):
                 line = line.strip()
                 if line:
-                    self._lines.append('<< %s' % line)
-        self._refresh_text()
+                    self._replies_text.append(line)
+        self._refresh()
 
-    def _refresh_text(self):
-        """始终把状态放第一行，并按"一行一个固定高度标签"渲染。
-
-        用固定高度的小标签，而不是整块自适应高度的标签：后者在手机上经常
-        拿不到有效尺寸而显示为空白。服务列表/回传记录用的就是这种写法，已验证可用。
-        """
-        state, message = self._ble.at_notify_state()
-        lines = ['AT 订阅：%s（%s）    已收到 %d 字节'
-                 % (_NOTIFY_STATE_TEXT.get(state, '未知'), message or '—', self._at_bytes)]
+    def rows(self):
+        """把结果整理成若干"短行"，每行都用固定高度标签渲染。"""
+        state, _message = self._ble.at_notify_state()
+        lines = ['AT 订阅：%s    已收到 %d 字节'
+                 % (_NOTIFY_STATE_TEXT.get(state, '未知'), self._at_bytes)]
         if self._at_bytes == 0:
-            lines.append('（若长时间为 0 字节，说明模块没有通过 6E400004 回复）')
-        lines.extend(self._lines[-40:])
-        self.result_text = '\n'.join(lines)
+            lines.append('0 字节 = 模块没有通过 6E400004 回复')
+        for key, label in AT_QUERY_LABELS:
+            value = '（无回复）'
+            for text in self._replies_text:
+                if text.startswith(key):
+                    value = text
+                    break
+            lines.append('%s：%s' % (label, value))
+        lines.append(self.verdict() if self._done else '查询中…')
+        return [clip_line(line) for line in lines]
 
+    def verdict(self):
+        """一句话结论（同时会写进"回传记录"，那条显示路径已在你手机上验证可用）。"""
+        auth = ''
+        status = ''
+        for text in self._replies_text:
+            if text.startswith('AT+AUTH'):
+                auth = text
+            elif text.startswith('AT+STATUS'):
+                status = text
+        if not auth and not status:
+            return '结论：模块未回复 AT（已收 %d 字节）' % self._at_bytes
+        short_auth = auth.replace('AT+AUTH=', '').replace(' OK', '').strip() or '无回复'
+        short_status = status.replace('AT+STATUS=', '').replace(' OK', '').strip() or '无回复'
+        return '结论：鉴权=%s  状态显示=%s' % (short_auth, short_status)
+
+    def _refresh(self):
+        lines = self.rows()
+        self.result_text = '\n'.join(lines)
         try:
             box = self.ids.diag_list
         except Exception:                                       # noqa: BLE001
             return
         box.clear_widgets()
         for line in lines:
-            box.add_widget(DiagRow(text=line))
+            box.add_widget(PopupRow(text=line))
 
 
 # ----------------------------------------------------------------------
@@ -658,8 +717,7 @@ class MainScreen(Screen):
         raw = bytes(bytearray(payload))
         raw_hex = to_hex(raw)
         text = decode_text(payload)
-        self._replies.append((time.strftime('%H:%M:%S'), cmd, text, raw_hex))
-        self.reply_label = '查看回传记录（%d）' % len(self._replies)
+        self.add_record('命令字 0x%02X · %d 字节' % (cmd, len(raw)), text, raw_hex)
         Logger.info('BleAssistant: 收到回传 cmd=0x%02X 载荷=%r 原始=%s', cmd, text, raw_hex)
 
         # 载荷为空或全是不可见字符时，直接把原始字节显示出来，
@@ -669,6 +727,18 @@ class MainScreen(Screen):
         else:
             body = '载荷不是可显示文字。\n原始字节：%s' % (raw_hex or '（空）')
         show_info('收到设备回传（0x%02X，%d 字节）' % (cmd, len(raw)), body)
+
+    def add_record(self, label, text, raw_hex=''):
+        """往"回传记录"里加一条。
+
+        模块诊断的结论也走这里——因为"回传记录"这条显示路径在你的手机上已验证可用，
+        等于给诊断结果留了第二条能被看到的通道。
+        """
+        self._replies.append((time.strftime('%H:%M:%S'), label, text, raw_hex))
+        self.reply_label = '查看回传记录（%d）' % len(self._replies)
+
+    def show_diag_summary(self, summary):
+        self.add_record('模块诊断', summary)
 
     # ------------------------------------------------------------------
     # 回传记录（本次登录期间）
@@ -694,7 +764,11 @@ class MainScreen(Screen):
         if not self.connected:
             show_info('未连接', '请先连接 BLE 设备，再做模块诊断。')
             return
-        ModuleDiagPopup(ble=App.get_running_app().ble).open()
+        popup = ModuleDiagPopup(ble=App.get_running_app().ble,
+                                on_result=self.show_diag_summary)
+        popup.open()
+        # 不依赖 on_open（Kivy 会延迟 0.5~1 秒才派发），弹出后立刻启动查询
+        Clock.schedule_once(lambda dt: popup.start(), 0.05)
 
     def open_device_dialog(self):
         if self.connected:
