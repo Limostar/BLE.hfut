@@ -90,6 +90,10 @@ class SimulatedBleManager(object):
         self._connect_target = None
         self._connect_started = None
         self._connected_address = None
+        # 与 Java 侧保持一致：断开时清掉订阅状态与残留回传
+        self._notify_state = NOTIFY_OFF
+        self._pending_received = []
+        self.reset_writes()
 
     # ------------------------------------------------------------------
     # 状态
@@ -125,9 +129,16 @@ class SimulatedBleManager(object):
         return ''
 
     def discovery_state(self):
+        # 与 status() 保持一致的连接判定（含"延迟到点后完成连接"的转换）
+        if not self._connected_address and self._connect_target is not None:
+            if time.monotonic() - self._connect_started >= CONNECT_DELAY:
+                self._connected_address = self._connect_target
         if not self._connected_address:
             return 0, ''
-        return 1, 'ok, 1 service(s) (desktop mock)'
+        return 4, 'ok, 4 service(s) (desktop mock)'
+
+    def cache_refresh_result(self):
+        return 'cleared (desktop mock)'
 
     # ------------------------------------------------------------------
     # 命令下发（桌面模拟：延迟一点后返回成功）

@@ -388,6 +388,15 @@ class AndroidBleManager(object):
         except Exception:
             return 0, ''
 
+    def cache_refresh_result(self):
+        """尝试清理安卓 GATT 缓存的结果（换过固件后经常需要）。"""
+        if not self.available:
+            return ''
+        try:
+            return str(self._helper.getCacheRefreshResult() or '')
+        except Exception:
+            return ''
+
     # ------------------------------------------------------------------
     # 状态（供界面轮询）
     # ------------------------------------------------------------------

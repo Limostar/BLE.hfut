@@ -282,13 +282,41 @@ class ServicesPopup(Popup):
         self._ble.ensure_services(force=True)
         Clock.schedule_once(lambda dt: self.refresh_list(), 1.0)
 
+    def copy_list(self):
+        """把服务表原文复制到剪贴板，方便直接贴出来排查。"""
+        count, message = self._ble.discovery_state()
+        notify_state, notify_message = self._ble.notify_state()
+        lines = ['已发现服务 %d 个 · %s' % (count, message or '—'),
+                 '回传订阅：%s（%s）' % (_NOTIFY_STATE_TEXT.get(notify_state, '未知'),
+                                        notify_message or '—'),
+                 '缓存清理：%s' % (self._ble.cache_refresh_result() or '—'),
+                 'App 配置的写入特征：%s' % ESP32_WRITE_UUID,
+                 'App 配置的通知特征：%s' % ESP32_NOTIFY_UUID,
+                 '']
+        for item in self._ble.services_info():
+            if item['characteristic']:
+                lines.append('特征 %s  [%s]' % (item['characteristic'],
+                                               item['properties'] or '未知'))
+            else:
+                lines.append('服务 %s' % item['service'])
+        text = '\n'.join(lines)
+        try:
+            from kivy.core.clipboard import Clipboard
+            Clipboard.copy(text)
+            show_info('已复制', '服务表内容已复制到剪贴板，直接粘贴出来即可。')
+        except Exception:
+            Logger.exception('BleAssistant: 复制服务表失败')
+            show_info('复制失败', text)
+
     def refresh_list(self):
         count, message = self._ble.discovery_state()
         notify_state, notify_message = self._ble.notify_state()
+        cache = self._ble.cache_refresh_result()
         self.ids.service_state.text = (
-            '已发现服务 %d 个 · %s\n回传订阅：%s（%s）'
+            '已发现服务 %d 个 · %s\n回传订阅：%s（%s）\n缓存清理：%s'
             % (count, message or '—',
-               _NOTIFY_STATE_TEXT.get(notify_state, '未知'), notify_message or '—'))
+               _NOTIFY_STATE_TEXT.get(notify_state, '未知'), notify_message or '—',
+               cache or '—'))
 
         box = self.ids.service_list
         box.clear_widgets()

@@ -632,7 +632,7 @@
             valign: 'top'
             text_size: self.size
             size_hint_y: None
-            height: dp(46)
+            height: dp(58)
         ScrollView:
             do_scroll_x: False
             bar_width: dp(3)
@@ -644,14 +644,18 @@
                 height: self.minimum_height
         BoxLayout:
             orientation: 'horizontal'
-            spacing: dp(10)
+            spacing: dp(8)
             size_hint_y: None
-            height: dp(46)
+            height: dp(44)
             RoundButton:
-                text: '重新发现服务'
-                font_size: sp(13)
+                text: '重新发现'
+                font_size: sp(12)
                 on_release: root.retry_discovery()
             RoundButton:
+                text: '复制列表'
+                font_size: sp(12)
+                on_release: root.copy_list()
+            RoundButton:
                 text: '关闭'
-                font_size: sp(13)
+                font_size: sp(12)
                 on_release: root.dismiss()

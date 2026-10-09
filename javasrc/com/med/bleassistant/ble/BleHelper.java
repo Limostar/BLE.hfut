@@ -285,6 +285,9 @@ public final class BleHelper {
                     }
                 } catch (Throwable ignored) {
                 }
+                // A stale per-device attribute cache is a real risk after
+                // reflashing the peripheral, so try to clear it first.
+                tryClearGattCache(g);
                 // discoverServices() often returns false when called right here,
                 // so the return value is checked and ensureServices() retries.
                 startServiceDiscovery(g);
@@ -391,6 +394,7 @@ public final class BleHelper {
             discoveryAttempts = 0;
             discoveryLastAttemptAt = 0L;
             discoveryMessage = "";
+            cacheRefreshResult = "";
             resetWrites();
             resetNotify();
             connState = CONN_CONNECTING;
@@ -420,7 +424,36 @@ public final class BleHelper {
     private static volatile int discoveryAttempts = 0;
     private static volatile long discoveryLastAttemptAt = 0L;
     private static volatile String discoveryMessage = "";
+    private static volatile String cacheRefreshResult = "";
     private static volatile long gattOpStartedAt = 0L;
+
+    /**
+     * Android caches the GATT attribute table per device address. When the
+     * peripheral is reflashed with a different table while keeping the same
+     * address (exactly what happens while iterating on firmware), every
+     * characteristic lookup can keep failing against that stale table.
+     * refresh() is a hidden API, available on many but not all builds, so the
+     * outcome is recorded and shown in the UI instead of failing silently.
+     */
+    private static boolean tryClearGattCache(BluetoothGatt g) {
+        if (g == null) {
+            return false;
+        }
+        try {
+            java.lang.reflect.Method refresh = g.getClass().getMethod("refresh");
+            Object result = refresh.invoke(g);
+            boolean cleared = (result instanceof Boolean) && ((Boolean) result).booleanValue();
+            cacheRefreshResult = cleared ? "cleared" : "refresh() returned false";
+            return cleared;
+        } catch (Throwable t) {
+            cacheRefreshResult = "unavailable (" + t.getClass().getSimpleName() + ")";
+            return false;
+        }
+    }
+
+    public static String getCacheRefreshResult() {
+        return cacheRefreshResult == null ? "" : cacheRefreshResult;
+    }
 
     private static void startServiceDiscovery(BluetoothGatt g) {
         if (g == null) {
