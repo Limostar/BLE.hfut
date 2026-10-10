@@ -422,10 +422,106 @@ class ReplyHistoryPopup(Popup):
                 text=clip_line('%s %s %s' % (stamp, label, shown), 52)))
 
 
+class AtDebugPopup(Popup):
+    """AT 调试：从手机直接给模块发任意 AT 指令。
+
+    走的是模块自带的 AT 指令通道（6E400004），**完全不经过串口**，
+    所以即使"模块 → 电脑"那条链路一点反应都没有，也能读写模块自己的配置。
+
+    典型用途：
+        AT+AUTH?      复核用户鉴权状态
+        AT+AUTH=0     关闭用户鉴权（开启时写入会被接受但不转发到串口）
+        AT+ECHO=1     打开串口回显（电脑写什么、模块就回什么）
+        AT+STATUS=1   打开状态显示（手机一连上，电脑端应出现 S:CONNECTED）
+        AT+RESTART    重启模块
+    """
+
+    command = StringProperty('AT+VERSION')
+    state = StringProperty('输入 AT 指令后点「发送」；回复显示在下方。')
+    MAX_ROWS = 6
+
+    def __init__(self, ble, **kwargs):
+        super(AtDebugPopup, self).__init__(**kwargs)
+        self._ble = ble
+        self._lines = []
+        self._timer = None
+        self._deadline = 0.0
+
+    # ------------------------------------------------------------------
+    def on_open(self, *args):
+        Clock.schedule_once(self._focus_input, 0.6)
+
+    def _focus_input(self, dt):
+        try:
+            self.ids.at_input.focus = True
+        except Exception:                                       # noqa: BLE001
+            pass
+
+    def quick(self, text):
+        """快捷按钮：填好指令后直接发。"""
+        self.command = text
+        self.send()
+
+    def send(self):
+        cmd = (self.command or '').strip()
+        if not cmd:
+            self.state = '请先输入一条 AT 指令。'
+            return
+        state, _message = self._ble.at_notify_state()
+        if state != NOTIFY_SUBSCRIBED:
+            self.state = 'AT 通道未订阅：请先回主界面点一次「模块诊断」。'
+            return
+        self._lines = []
+        self._render()
+        self.state = '已发送 %s，等待回复…' % cmd
+        self._ble.send_command('', ESP32_AT_UUID,
+                               to_hex((cmd + '\r\n').encode('utf-8')))
+        self._deadline = time.monotonic() + 2.0
+        if self._timer is not None:
+            self._timer.cancel()
+        self._timer = Clock.schedule_interval(self._poll, 0.2)
+
+    def _poll(self, dt):
+        got = False
+        for chunk in self._ble.pop_received_at():
+            try:
+                raw = bytes(bytearray.fromhex(chunk))
+            except ValueError:
+                continue
+            got = True
+            text = raw.decode('utf-8', 'replace').replace('\r', '')
+            for line in text.split('\n'):
+                line = line.strip()
+                if line:
+                    self._lines.append(clip_line(line, 46))
+        if got:
+            self._render()
+        if time.monotonic() >= self._deadline:
+            self._stop_poll()
+            if not self._lines:
+                self._lines.append('（2 秒内没有收到回复，可能指令不被支持）')
+                self._render()
+            self.state = '完成，收到 %d 行回复。' % len(self._lines)
+
+    def _stop_poll(self):
+        if self._timer is not None:
+            self._timer.cancel()
+            self._timer = None
+
+    def _render(self):
+        box = self.ids.at_reply
+        box.clear_widgets()
+        for line in self._lines[-self.MAX_ROWS:]:
+            box.add_widget(PopupRow(text=line))
+
+    def on_dismiss(self, *args):
+        self._stop_poll()
+
+
 # ----------------------------------------------------------------------
 # 模块诊断（AT 指令通道，只走蓝牙）
 # ----------------------------------------------------------------------
-AT_QUERIES = ['AT+VERSION?', 'AT+ROLE?', 'AT+UART?', 'AT+STATUS?', 'AT+AUTH?', 'AT+NAME?']
+AT_QUERIES = ['AT+VERSION', 'AT+ROLE?', 'AT+UART?', 'AT+STATUS?', 'AT+AUTH?', 'AT+NAME?']
 
 AT_QUERY_LABELS = (('AT+VERSION', '固件版本'), ('AT+ROLE', '设备角色'),
                    ('AT+UART', '串口波特率'), ('AT+STATUS', '状态显示'),
@@ -799,6 +895,13 @@ class MainScreen(Screen):
         for line in detail_lines:
             self.add_record('模块诊断明细', line)
         self.add_record('模块诊断', summary)
+
+    def open_at_debug(self):
+        """AT 调试弹窗：走蓝牙 AT 通道读写模块配置，不经过串口。"""
+        if not self.connected:
+            show_info('未连接', '请先连接 BLE 设备，再使用 AT 调试。')
+            return
+        AtDebugPopup(ble=App.get_running_app().ble).open()
 
     def open_device_dialog(self):
         if self.connected:

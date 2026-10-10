@@ -452,18 +452,23 @@
                 height: dp(48)
                 RoundButton:
                     text: '蓝牙连接'
-                    font_size: sp(14)
+                    font_size: sp(12)
                     on_release: root.open_device_dialog()
                 RoundButton:
                     text: '断开连接'
-                    font_size: sp(14)
+                    font_size: sp(12)
                     disabled: not root.connected
                     on_release: root.do_disconnect()
                 RoundButton:
                     text: '服务/特征'
-                    font_size: sp(14)
+                    font_size: sp(12)
                     disabled: not root.connected
                     on_release: root.open_services_dialog()
+                RoundButton:
+                    text: 'AT 调试'
+                    font_size: sp(12)
+                    disabled: not root.connected
+                    on_release: root.open_at_debug()
 
         # ---------- 8 个预留功能按钮 ----------
         GridLayout:
@@ -528,6 +533,81 @@
         RoundButton:
             text: '知道了'
             on_release: root.dismiss()
+
+<AtDebugPopup>:
+    title: 'AT 调试（走蓝牙，不经过串口）'
+    title_font: app.font_name
+    title_size: sp(15)
+    title_color: app.COLOR_PRIMARY_DARK
+    separator_color: app.COLOR_LINE
+    size_hint: 0.95, 0.86
+    BoxLayout:
+        orientation: 'vertical'
+        spacing: dp(6)
+        padding: dp(6)
+
+        TextInput:
+            id: at_input
+            text: root.command
+            font_name: app.font_name
+            font_size: sp(13)
+            multiline: False
+            size_hint_y: None
+            height: dp(42)
+            on_text: root.command = self.text
+
+        BoxLayout:
+            orientation: 'horizontal'
+            spacing: dp(6)
+            size_hint_y: None
+            height: dp(38)
+            RoundButton:
+                text: 'AUTH?'
+                font_size: sp(11)
+                on_release: root.quick('AT+AUTH?')
+            RoundButton:
+                text: 'AUTH=0'
+                font_size: sp(11)
+                on_release: root.quick('AT+AUTH=0')
+            RoundButton:
+                text: 'ECHO=1'
+                font_size: sp(11)
+                on_release: root.quick('AT+ECHO=1')
+            RoundButton:
+                text: 'STATUS=1'
+                font_size: sp(11)
+                on_release: root.quick('AT+STATUS=1')
+
+        BoxLayout:
+            orientation: 'horizontal'
+            spacing: dp(6)
+            size_hint_y: None
+            height: dp(40)
+            RoundButton:
+                text: '发送'
+                font_size: sp(13)
+                on_release: root.send()
+            RoundButton:
+                text: '重启模块'
+                font_size: sp(12)
+                on_release: root.quick('AT+RESTART')
+            RoundButton:
+                text: '关闭'
+                font_size: sp(13)
+                on_release: root.dismiss()
+
+        Label:
+            text: root.state
+            font_name: app.font_name
+            font_size: sp(11)
+            color: app.COLOR_TEXT_WEAK
+            size_hint_y: None
+            height: dp(18)
+
+        BoxLayout:
+            id: at_reply
+            orientation: 'vertical'
+            spacing: dp(2)
 
 <DevicePopup>:
     title: '选择附近的 BLE 设备'

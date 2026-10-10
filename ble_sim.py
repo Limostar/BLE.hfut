@@ -20,9 +20,9 @@ SIM_REPLY_TEXT = 'Hello World'
 # 模块 AT 指令通道（与真机一致）
 AT_UUID = '6e400004-b5a3-f393-e0a9-e50e24dcca9e'
 SIM_AT_REPLIES = {
-    'AT+VERSION?': 'AT+VERSION=2024.12.31\r\nOK\r\n',
+    'AT+VERSION': 'AT+VERSION=2024.12.31\r\nOK\r\n',
     'AT+ROLE?': 'AT+ROLE=0 OK\r\n',
-    'AT+UART?': 'AT+UART=115200 OK\r\n',
+    'AT+UART?': 'AT+UART=9600 OK\r\n',
     'AT+STATUS?': 'AT+STATUS=1 OK\r\n',
     'AT+AUTH?': 'AT+AUTH=0,0000,15 OK\r\n',
     'AT+NAME?': 'AT+NAME=0,Tv700u-2FF1CF OK\r\n',
