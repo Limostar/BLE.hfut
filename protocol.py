@@ -14,7 +14,28 @@ FRAME_HEADER = (0xAA, 0x55)
 
 # 命令字：两端约定，App 下发用 CMD_*，设备回传用 REPLY_*
 CMD_FUNC_1 = 0x01      # App → 设备：功能一
-REPLY_FUNC_1 = 0x81    # 设备 → App：功能一的回传
+REPLY_FUNC_1 = 0x81    # 设备 → App：功能一第一条回传（Hello World）
+REPLY_ACCESS = 0x82    # 设备 → App：功能一第二条回传（Access，延迟 3 秒）
+
+# 功能二预制的三个示例命令包：名称 / 命令字 / 回传命令字 / 回传文字
+#   在手机的「功能二」输入框里填名称（HFUT、MECH、GREAT），或直接填命令包十六进制，
+#   都会发到设备；设备按命令字回传对应文字，手机上就能看到不同的反馈。
+EXAMPLE_COMMANDS = (
+    ('HFUT', 0x02, 0x83, 'HFUT'),
+    ('MECH', 0x03, 0x84, 'MECH'),
+    ('GREAT', 0x04, 0x85, 'GREAT'),
+)
+
+EXAMPLE_BY_NAME = dict((name, (cmd, reply_cmd, reply_text))
+                       for name, cmd, reply_cmd, reply_text in EXAMPLE_COMMANDS)
+
+EXAMPLE_BY_CMD = dict((cmd, (reply_cmd, reply_text))
+                      for _name, cmd, reply_cmd, reply_text in EXAMPLE_COMMANDS)
+
+
+def example_by_name(name):
+    """按示例名称查表；查不到返回 None（大小写不敏感）。"""
+    return EXAMPLE_BY_NAME.get((name or '').strip().upper())
 
 # 单次写入的载荷上限：蓝牙默认 MTU=23，减去 3 字节 ATT 协议头，即 20 字节。
 # 超过这个长度需要先协商 MTU 再分片，当前版本会明确提示而不是静默失败。

@@ -7,25 +7,25 @@
 
 import time
 
-from protocol import REPLY_FUNC_1, build_frame, to_hex
+from protocol import CMD_FUNC_1, EXAMPLE_BY_CMD, REPLY_FUNC_1, build_frame, to_hex
 
 SCAN_IDLE, SCAN_RUNNING, SCAN_FAILED = 0, 1, 2
 CONN_IDLE, CONN_CONNECTING, CONN_CONNECTED, CONN_DISCONNECTED, CONN_FAILED = 0, 1, 2, 3, 4
 WRITE_IDLE, WRITE_SENDING, WRITE_SUCCESS, WRITE_FAILED = 0, 1, 2, 3
 NOTIFY_OFF, NOTIFY_SUBSCRIBING, NOTIFY_SUBSCRIBED, NOTIFY_FAILED = 0, 1, 2, 3
 
-# 模拟设备收到「功能一」后回传的内容（与 ESP32 端保持一致）
+# 模拟设备收到「功能一」后回传的内容（与桥接脚本保持一致）
 SIM_REPLY_TEXT = 'Hello World'
 
-# 模块 AT 指令通道（与真机一致）
+# 模块 AT 指令通道（与真机一致）。波特率/名称按"锁定后的配置"显示。
 AT_UUID = '6e400004-b5a3-f393-e0a9-e50e24dcca9e'
 SIM_AT_REPLIES = {
     'AT+VERSION': 'AT+VERSION=2024.12.31\r\nOK\r\n',
     'AT+ROLE?': 'AT+ROLE=0 OK\r\n',
-    'AT+UART?': 'AT+UART=9600 OK\r\n',
+    'AT+UART?': 'AT+UART=115200 OK\r\n',
     'AT+STATUS?': 'AT+STATUS=1 OK\r\n',
     'AT+AUTH?': 'AT+AUTH=0,0000,15 OK\r\n',
-    'AT+NAME?': 'AT+NAME=0,Tv700u-2FF1CF OK\r\n',
+    'AT+NAME?': 'AT+NAME=0,HFUT.BLE OK\r\n',
 }
 
 _FAKE_DEVICES = [
@@ -65,6 +65,7 @@ class SimulatedBleManager(object):
         self._write_message = ''
         self._write_length = 0
         self._write_target = ''
+        self._write_frame = b''
         self._notify_state = NOTIFY_OFF
         self._pending_received = []
         self._at_state = NOTIFY_OFF
@@ -194,6 +195,7 @@ class SimulatedBleManager(object):
 
         if len(text) // 2 > 20:
             return False, 'command payload is longer than a single write'
+        self._write_frame = bytes(bytearray.fromhex(text))
         self._write_length = len(text) // 2
         self._write_target = (char_uuid or '6e400002-b5a3-f393-e0a9-e50e24dcca9e '
                                             '(auto-picked, desktop mock)').strip()
@@ -213,12 +215,27 @@ class SimulatedBleManager(object):
         if time.monotonic() - self._write_started >= WRITE_DELAY:
             self._write_result = WRITE_SUCCESS
             self._write_message = 'wrote %d byte(s) successfully' % self._write_length
-            # 模拟 ESP32：写入成功后回传一帧（载荷就是给界面显示的文本）
+            # 按命令字回传（与 bridge.py 的行为一致）
             if self._notify_state == NOTIFY_SUBSCRIBED:
-                self._pending_received.append(
-                    to_hex(build_frame(REPLY_FUNC_1, SIM_REPLY_TEXT.encode('utf-8'))))
+                for reply_cmd, reply_text in self._replies_for(self._write_frame):
+                    self._pending_received.append(
+                        to_hex(build_frame(reply_cmd, reply_text.encode('utf-8'))))
             return self._write_result, self._write_message
         return WRITE_SENDING, ''
+
+    @staticmethod
+    def _replies_for(frame):
+        """命令帧 → 设备应该回传的 [(命令字, 文字), ...]。"""
+        if len(frame) < 3 or frame[0] != 0xAA or frame[1] != 0x55:
+            return []
+        cmd = frame[2]
+        if cmd == CMD_FUNC_1:
+            return [(REPLY_FUNC_1, SIM_REPLY_TEXT)]
+        example = EXAMPLE_BY_CMD.get(cmd)
+        if example is not None:
+            reply_cmd, reply_text = example
+            return [(reply_cmd, reply_text)]
+        return []
 
     # ------------------------------------------------------------------
     # 回传（桌面模拟：订阅即成功，写入成功后自动回一帧）
@@ -241,6 +258,7 @@ class SimulatedBleManager(object):
         self._write_started = None
         self._write_result = None
         self._write_message = ''
+        self._write_frame = b''
 
     def services_info(self):
         return [dict(item) for item in _FAKE_SERVICES]

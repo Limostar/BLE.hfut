@@ -27,8 +27,8 @@ from kivy.uix.screenmanager import Screen, ScreenManager
 from kivy.utils import platform
 
 from accounts import AccountStore
-from protocol import (CMD_FUNC_1, MAX_PAYLOAD, REPLY_FUNC_1, RxFrameParser,
-                      build_frame, decode_text, to_hex)
+from protocol import (CMD_FUNC_1, MAX_PAYLOAD, RxFrameParser, build_frame,
+                      decode_text, example_by_name, to_hex)
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 KV_FILE = os.path.join(APP_DIR, 'ui.kv')
@@ -71,9 +71,7 @@ ESP32_SERVICE_UUID = ''
 ESP32_NOTIFY_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'
 
 # 模块自带的 AT 指令通道 UUID（只走蓝牙、不经过串口）
-# 用于"模块诊断"：读模块的版本/角色/波特率/状态显示/用户鉴权等设置。
-# 一旦模块开了用户鉴权(AT+AUTH=1)，App 没有鉴权密码，模块会静默丢弃手机写入的数据
-# —— 现象与"串口线没接"一模一样，所以这个诊断很有用。
+# 用于「服务/特征」里的"模块信息"：读模块的固件版本/角色/波特率/状态显示/鉴权/名称。
 ESP32_AT_UUID = '6e400004-b5a3-f393-e0a9-e50e24dcca9e'
 
 # 自动兜底开关：默认关闭（要确定性）。
@@ -305,15 +303,57 @@ class CommandPopup(Popup):
 
 
 class ServicesPopup(Popup):
-    """列出已连接设备暴露的服务与特征，用来确认要写哪个 UUID。"""
+    """列出已连接设备暴露的服务与特征，并显示模块自身信息。
+
+    模块信息（固件版本/角色/波特率/状态显示/鉴权/名称）走模块自带的
+    AT 指令通道读取——只走蓝牙、不经过串口，打开弹窗时会自动读一次。
+    """
 
     def __init__(self, ble, **kwargs):
         super(ServicesPopup, self).__init__(**kwargs)
         self._ble = ble
+        self._diag = None
 
     def on_open(self, *args):
         super(ServicesPopup, self).on_open(*args)
         self.refresh_list()
+        self.refresh_module_info()
+
+    def on_dismiss(self, *args):
+        self._stop_diag()
+        super(ServicesPopup, self).on_dismiss(*args)
+
+    def _stop_diag(self):
+        if self._diag is not None:
+            self._diag.stop()
+            self._diag = None
+
+    def refresh_module_info(self):
+        """读一次模块自身信息，填到弹窗下面的 6 行里。
+
+        某一项查不到或格式不对，该行显示「输出异常」。
+        """
+        self._stop_diag()
+        self._diag = ModuleDiagRunner(
+            ble=self._ble,
+            on_lines=self._set_diag_lines,
+            on_progress=self._set_module_state)
+        if not self._diag.start():
+            self._set_module_state('模块信息（AT 通道读取）：读取失败')
+
+    def _set_diag_lines(self, lines):
+        for index, text in enumerate(lines[:6], start=1):
+            try:
+                label = self.ids['svc_diag_%d' % index]
+            except Exception:                                   # noqa: BLE001
+                continue
+            label.text = clip_line(text, 40)
+
+    def _set_module_state(self, text):
+        try:
+            self.ids.module_state.text = clip_line(text, 30)
+        except Exception:                                       # noqa: BLE001
+            pass
 
     def retry_discovery(self):
         """手动重新发起服务发现，1 秒后刷新列表。"""
@@ -422,27 +462,26 @@ class ReplyHistoryPopup(Popup):
                 text=clip_line('%s %s %s' % (stamp, label, shown), 52)))
 
 
-class AtDebugPopup(Popup):
-    """AT 调试：从手机直接给模块发任意 AT 指令。
+class CommandInputPopup(Popup):
+    """功能二：用户自己输入命令包并发送，回传直接显示在弹窗里。
 
-    走的是模块自带的 AT 指令通道（6E400004），**完全不经过串口**，
-    所以即使"模块 → 电脑"那条链路一点反应都没有，也能读写模块自己的配置。
+    输入框接受两种写法：
+      - 示例名称：HFUT / MECH / GREAT（大小写都行）
+        自动换成预制好的命令包，设备会对应回传 HFUT / MECH / GREAT
+      - 直接的十六进制命令包，例如 AA55020002
+        （帧格式：AA 55 命令字 长度 数据 异或校验）
 
-    典型用途：
-        AT+AUTH?      复核用户鉴权状态
-        AT+AUTH=0     关闭用户鉴权（开启时写入会被接受但不转发到串口）
-        AT+ECHO=1     打开串口回显（电脑写什么、模块就回什么）
-        AT+STATUS=1   打开状态显示（手机一连上，电脑端应出现 S:CONNECTED）
-        AT+RESTART    重启模块
+    走的是数据通道（6E400002），与「功能一」同一条路。
     """
 
-    command = StringProperty('AT+VERSION')
-    state = StringProperty('输入 AT 指令后点「发送」；回复显示在下方。')
-    MAX_ROWS = 6
+    command = StringProperty('HFUT')
+    state = StringProperty('输入示例名称（HFUT / MECH / GREAT）或十六进制命令包，再点「发送」。')
+    MAX_ROWS = 5
 
-    def __init__(self, ble, **kwargs):
-        super(AtDebugPopup, self).__init__(**kwargs)
+    def __init__(self, ble, on_closed=None, **kwargs):
+        super(CommandInputPopup, self).__init__(**kwargs)
         self._ble = ble
+        self._on_closed = on_closed
         self._lines = []
         self._timer = None
         self._deadline = 0.0
@@ -453,55 +492,80 @@ class AtDebugPopup(Popup):
 
     def _focus_input(self, dt):
         try:
-            self.ids.at_input.focus = True
+            self.ids.cmd_input.focus = True
         except Exception:                                       # noqa: BLE001
             pass
 
-    def quick(self, text):
-        """快捷按钮：填好指令后直接发。"""
-        self.command = text
+    def quick(self, name):
+        """示例快捷按钮：填好名称后直接发送。"""
+        self.command = name
         self.send()
 
+    def _resolve(self, text):
+        """输入 → (命令包十六进制, 说明)；无法识别时返回 (None, 原因)。"""
+        raw = (text or '').strip()
+        if not raw:
+            return None, '请先输入命令内容。'
+        example = example_by_name(raw)
+        if example is not None:
+            cmd, _reply_cmd, reply_text = example
+            return (to_hex(build_frame(cmd)),
+                    '示例 %s（命令字 0x%02X，设备将回传 %s）'
+                    % (raw.upper(), cmd, reply_text))
+        compact = raw.replace(' ', '').replace('-', '').upper()
+        if (len(compact) >= 2 and len(compact) % 2 == 0
+                and all(ch in '0123456789ABCDEF' for ch in compact)):
+            return compact, '自定义命令包（%d 字节）' % (len(compact) // 2)
+        return None, ('无法识别：请输入示例名称 HFUT / MECH / GREAT，'
+                      '或偶数长度的十六进制命令包。')
+
     def send(self):
-        cmd = (self.command or '').strip()
-        if not cmd:
-            self.state = '请先输入一条 AT 指令。'
+        hex_data, note = self._resolve(self.command)
+        if hex_data is None:
+            self.state = note
             return
-        state, _message = self._ble.at_notify_state()
-        if state != NOTIFY_SUBSCRIBED:
-            self.state = 'AT 通道未订阅：请先回主界面点一次「模块诊断」。'
+        if len(hex_data) // 2 > MAX_PAYLOAD:
+            self.state = '命令包 %d 字节，超过单次写入上限 %d 字节。' % (
+                len(hex_data) // 2, MAX_PAYLOAD)
             return
         self._lines = []
         self._render()
-        self.state = '已发送 %s，等待回复…' % cmd
-        self._ble.send_command('', ESP32_AT_UUID,
-                               to_hex((cmd + '\r\n').encode('utf-8')))
-        self._deadline = time.monotonic() + 2.0
+        accepted, message = self._ble.send_command(ESP32_SERVICE_UUID,
+                                                   ESP32_WRITE_UUID,
+                                                   hex_data,
+                                                   auto_pick=ESP32_AUTO_PICK_WRITE)
+        if not accepted:
+            self.state = '下发失败：%s' % message
+            return
+        self.state = '已发送 %s，等待写入完成…' % note
+        self._deadline = time.monotonic() + WRITE_TIMEOUT
         if self._timer is not None:
             self._timer.cancel()
         self._timer = Clock.schedule_interval(self._poll, 0.2)
 
     def _poll(self, dt):
-        got = False
-        for chunk in self._ble.pop_received_at():
-            try:
-                raw = bytes(bytearray.fromhex(chunk))
-            except ValueError:
-                continue
-            got = True
-            text = raw.decode('utf-8', 'replace').replace('\r', '')
-            for line in text.split('\n'):
-                line = line.strip()
-                if line:
-                    self._lines.append(clip_line(line, 46))
-        if got:
-            self._render()
+        state, message = self._ble.write_state()
+        if state == WRITE_SUCCESS:
+            self._stop_poll()
+            self.state = '命令已写入设备，等待回传…'
+            return
+        if state == WRITE_FAILED:
+            self._stop_poll()
+            self.state = '写入失败：%s' % (message or '未知原因')
+            return
         if time.monotonic() >= self._deadline:
             self._stop_poll()
-            if not self._lines:
-                self._lines.append('（2 秒内没有收到回复，可能指令不被支持）')
-                self._render()
-            self.state = '完成，收到 %d 行回复。' % len(self._lines)
+            self.state = '写入超时，请检查连接后重试。'
+
+    def add_reply(self, cmd, text, raw_hex):
+        """把收到的设备回传追加进弹窗（由主界面转发过来）。"""
+        if text.strip():
+            shown = text.strip()
+        else:
+            shown = '（非文本载荷，原始：%s）' % (raw_hex or '空')
+        self._lines.append(clip_line('回传 0x%02X：%s' % (cmd, shown), 46))
+        self._render()
+        self.state = '收到设备回传：%s' % clip_line(shown, 16)
 
     def _stop_poll(self):
         if self._timer is not None:
@@ -509,13 +573,18 @@ class AtDebugPopup(Popup):
             self._timer = None
 
     def _render(self):
-        box = self.ids.at_reply
+        box = self.ids.cmd_reply
         box.clear_widgets()
-        for line in self._lines[-self.MAX_ROWS:]:
+        lines = self._lines[-self.MAX_ROWS:] or ['（还没有收到回传）']
+        # 按时间顺序加入：Kivy 的 BoxLayout 会把最后加入的放在最上面，
+        # 所以最新的回传显示在最上方（与「查看回传记录」用同一套写法）。
+        for line in lines:
             box.add_widget(PopupRow(text=line))
 
     def on_dismiss(self, *args):
         self._stop_poll()
+        if self._on_closed is not None:
+            self._on_closed()
 
 
 # ----------------------------------------------------------------------
@@ -543,17 +612,16 @@ BAD_OUTPUT = '输出异常'
 
 
 class ModuleDiagRunner(object):
-    """按节奏发送 AT 查询并收集回复（不依赖任何弹窗）。
+    """按节奏发送 6 条 AT 查询、收集回复，结果交给回调显示。
 
-    为什么不用弹窗：弹窗正文在你的手机上多次显示为空白，而主界面上的
-    固定高度标签（状态卡那一行）是已经验证过能显示的，所以结果直接写回主界面。
+    用于「服务/特征」弹窗里的"模块信息"：查不到或格式不对的那一项会显示
+    「输出异常」。走模块自带的 AT 指令通道（6E400004），只走蓝牙、不经过串口。
     """
 
-    def __init__(self, ble, on_lines=None, on_progress=None, on_done=None):
+    def __init__(self, ble, on_lines=None, on_progress=None):
         self._ble = ble
         self._on_lines = on_lines
         self._on_progress = on_progress
-        self._on_done = on_done
         self._replies_text = []
         self._timer = None
         self._sent = 0
@@ -564,11 +632,11 @@ class ModuleDiagRunner(object):
     def start(self):
         state, _message = self._ble.at_notify_state()
         if state != NOTIFY_SUBSCRIBED:
-            self._progress('AT 未订阅')
+            self._progress('AT 通道未订阅，读取失败')
             self._emit_lines(['%s：%s' % (name, BAD_OUTPUT)
                               for _key, name in AT_QUERY_LABELS])
             return False
-        self._progress('诊断中…')
+        self._progress('读取模块信息 0/6')
         self._emit_lines(['%s：查询中…' % name for _key, name in AT_QUERY_LABELS])
         self._timer = Clock.schedule_interval(self._step, 0.35)
         return True
@@ -587,7 +655,7 @@ class ModuleDiagRunner(object):
             self._sent += 1
             self._ble.send_command('', ESP32_AT_UUID,
                                    to_hex((query + '\r\n').encode('utf-8')))
-            self._progress('诊断中 %d/6' % self._sent)
+            self._progress('读取模块信息 %d/6' % self._sent)
             return
         if self._elapsed > len(AT_QUERIES) * 0.35 + 2.5:
             self.stop()
@@ -623,17 +691,6 @@ class ModuleDiagRunner(object):
                 out.append(clip_line('%s：%s' % (name, value.split(' OK')[0].strip()), 40))
         return out
 
-    def summary(self):
-        """一行总览（写进回传记录）。"""
-        auth = self.value_of('AT+AUTH')
-        status = self.value_of('AT+STATUS')
-        if not auth and not status:
-            return '模块诊断全部%s（已收 %d 字节）' % (BAD_OUTPUT, self._at_bytes)
-        short_auth = auth.replace('AT+AUTH=', '').replace(' OK', '').strip() or BAD_OUTPUT
-        short_status = status.replace('AT+STATUS=', '').replace(' OK', '').strip() or BAD_OUTPUT
-        return '模块诊断：鉴权=%s 状态显示=%s 收=%d字节' % (
-            short_auth, short_status, self._at_bytes)
-
     def _emit_lines(self, lines=None):
         if self._on_lines is not None:
             self._on_lines(self.lines() if lines is None else lines)
@@ -643,14 +700,11 @@ class ModuleDiagRunner(object):
             self._on_progress(text)
 
     def _done(self):
-        if self._finished:              # 防止重复收尾（重复写记录）
+        if self._finished:              # 防止重复收尾
             return
         self._finished = True
         self._emit_lines()
-        summary = self.summary()
-        self._progress('模块诊断')
-        if self._on_done is not None:
-            self._on_done(summary, self.lines())
+        self._progress('模块信息（AT 通道读取）')
 
 
 # ----------------------------------------------------------------------
@@ -727,7 +781,6 @@ class MainScreen(Screen):
     connected = BooleanProperty(False)
     user_text = StringProperty('')
     reply_label = StringProperty('查看回传记录')
-    diag_button = StringProperty('模块诊断')
 
     def __init__(self, **kwargs):
         super(MainScreen, self).__init__(**kwargs)
@@ -735,7 +788,7 @@ class MainScreen(Screen):
         self._parser = RxFrameParser()
         self._notify_subscribed = False
         self._at_subscribed = False
-        self._diag = None
+        self._cmd_popup = None
         self._replies = []          # 本次登录期间收到的设备回传
 
     def on_enter(self, *args):
@@ -751,8 +804,7 @@ class MainScreen(Screen):
         if self._poll is not None:
             self._poll.cancel()
             self._poll = None
-        if self._diag is not None:
-            self._diag.stop()
+        self._cmd_popup = None
 
     def _refresh(self, dt):
         ble = App.get_running_app().ble
@@ -791,7 +843,7 @@ class MainScreen(Screen):
                 ble.enable_notify(ESP32_SERVICE_UUID, ESP32_NOTIFY_UUID,
                                   auto_pick=ESP32_AUTO_PICK_NOTIFY)
 
-        # 数据通道就绪后，顺便订阅模块的 AT 指令通道（供"模块诊断"使用）
+        # 数据通道就绪后，顺便订阅模块的 AT 指令通道（供「服务/特征」里的模块信息使用）
         if self._notify_subscribed and not self._at_subscribed:
             state, _message = ble.at_notify_state()
             if state == NOTIFY_SUBSCRIBED:
@@ -825,19 +877,19 @@ class MainScreen(Screen):
             body = text
         else:
             body = '载荷不是可显示文字。\n原始字节：%s' % (raw_hex or '（空）')
+
+        # 「功能二」的自定义命令弹窗开着时，回传直接显示在它里面，
+        # 不再另外弹一个提示框（否则两层弹窗叠在一起）。
+        popup = self._cmd_popup
+        if popup is not None:
+            popup.add_reply(cmd, text, raw_hex)
+            return
         show_info('收到设备回传（0x%02X，%d 字节）' % (cmd, len(raw)), body)
 
     def add_record(self, label, text, raw_hex=''):
-        """往"回传记录"里加一条。
-
-        模块诊断的结论也走这里——因为"回传记录"这条显示路径在你的手机上已验证可用，
-        等于给诊断结果留了第二条能被看到的通道。
-        """
+        """往"回传记录"里加一条（设备回传、以及「服务/特征」里的模块信息都走这里）。"""
         self._replies.append((time.strftime('%H:%M:%S'), label, text, raw_hex))
         self.reply_label = '查看回传记录（%d）' % len(self._replies)
-
-    def show_diag_summary(self, summary):
-        self.add_record('模块诊断', summary)
 
     # ------------------------------------------------------------------
     # 回传记录（本次登录期间）
@@ -858,50 +910,17 @@ class MainScreen(Screen):
     def open_reply_dialog(self):
         ReplyHistoryPopup(history=self.replies(), on_clear=self.clear_replies).open()
 
-    def run_module_diag(self):
-        """模块诊断：走模块自带的 AT 通道读它自己的设置（不经过串口）。
-
-        结果**固定显示在主界面上的 6 行标签**里（一行一项，不轮换、不弹窗），
-        用的是和状态卡/服务页绿字完全相同的那套写法；查不到或格式不对的行
-        会显示「输出异常」。同时写进「回传记录」作为第二条通道。
-        """
+    def open_command_input(self):
+        """功能二：自定义命令包输入弹窗（内含 HFUT / MECH / GREAT 三个示例）。"""
         if not self.connected:
-            show_info('未连接', '请先连接 BLE 设备，再做模块诊断。')
+            show_info('未连接', '请先连接 BLE 设备，再下发命令。')
             return
-        if self._diag is not None:
-            self._diag.stop()
-        self._diag = ModuleDiagRunner(
-            ble=App.get_running_app().ble,
-            on_lines=self._set_diag_lines,
-            on_progress=self._set_diag_progress,
-            on_done=self._on_diag_done)
-        self._diag.start()
+        self._cmd_popup = CommandInputPopup(ble=App.get_running_app().ble,
+                                            on_closed=self._on_cmd_popup_closed)
+        self._cmd_popup.open()
 
-    def _set_diag_lines(self, lines):
-        """把 6 行检验结果写进主界面上 6 个固定高度标签。"""
-        for index, text in enumerate(lines[:6], start=1):
-            try:
-                label = self.ids['diag_%d' % index]
-            except Exception:                                   # noqa: BLE001
-                continue
-            label.text = clip_line(text, 40)
-
-    def _set_diag_progress(self, text):
-        self.diag_button = clip_line(text, 12)
-
-    def _on_diag_done(self, summary, detail_lines):
-        # 先写明细、最后写结论：记录页按"最新的在上面"排列，
-        # 这样打开记录页第一眼看到的就是结论本身
-        for line in detail_lines:
-            self.add_record('模块诊断明细', line)
-        self.add_record('模块诊断', summary)
-
-    def open_at_debug(self):
-        """AT 调试弹窗：走蓝牙 AT 通道读写模块配置，不经过串口。"""
-        if not self.connected:
-            show_info('未连接', '请先连接 BLE 设备，再使用 AT 调试。')
-            return
-        AtDebugPopup(ble=App.get_running_app().ble).open()
+    def _on_cmd_popup_closed(self):
+        self._cmd_popup = None
 
     def open_device_dialog(self):
         if self.connected:
@@ -923,9 +942,12 @@ class MainScreen(Screen):
         ServicesPopup(ble=App.get_running_app().ble).open()
 
     def reserved(self, name):
-        # 功能一已接入真实命令下发，其余按钮仍是预留
+        # 功能一 = 固定命令；功能二 = 自定义命令包；其余仍是预留
         if name == '功能一':
             self._send_function_one()
+            return
+        if name == '功能二':
+            self.open_command_input()
             return
         show_info('功能预留', '「%s」为预留功能，后续可在此接入具体医疗设备指令。' % name)
 

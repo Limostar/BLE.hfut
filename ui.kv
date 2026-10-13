@@ -420,30 +420,6 @@
                     text: root.reply_label
                     font_size: sp(12)
                     on_release: root.open_reply_dialog()
-                RoundButton:
-                    text: root.diag_button
-                    font_size: sp(12)
-                    on_release: root.run_module_diag()
-
-            # ---------- AT 检验 6 行（固定常显，便于截图确认）----------
-            DiagLine:
-                id: diag_1
-                text: '固件版本：未查询'
-            DiagLine:
-                id: diag_2
-                text: '设备角色：未查询'
-            DiagLine:
-                id: diag_3
-                text: '串口波特率：未查询'
-            DiagLine:
-                id: diag_4
-                text: '状态显示：未查询'
-            DiagLine:
-                id: diag_5
-                text: '用户鉴权：未查询'
-            DiagLine:
-                id: diag_6
-                text: '设备名称：未查询'
 
             BoxLayout:
                 orientation: 'horizontal'
@@ -464,11 +440,6 @@
                     font_size: sp(12)
                     disabled: not root.connected
                     on_release: root.open_services_dialog()
-                RoundButton:
-                    text: 'AT 调试'
-                    font_size: sp(12)
-                    disabled: not root.connected
-                    on_release: root.open_at_debug()
 
         # ---------- 8 个预留功能按钮 ----------
         GridLayout:
@@ -477,7 +448,7 @@
             spacing: dp(8)
             padding: dp(18), dp(6), dp(18), dp(14)
             size_hint_y: None
-            height: dp(4 * 42 + 3 * 8 + 20)
+            height: dp(4 * 56 + 3 * 8 + 20)
             RoundButton:
                 text: '功能一'
                 disabled: not root.connected
@@ -485,7 +456,7 @@
             RoundButton:
                 text: '功能二'
                 disabled: not root.connected
-                on_release: root.reserved('功能二')
+                on_release: root.open_command_input()
             RoundButton:
                 text: '功能三'
                 disabled: not root.connected
@@ -534,20 +505,31 @@
             text: '知道了'
             on_release: root.dismiss()
 
-<AtDebugPopup>:
-    title: 'AT 调试（走蓝牙，不经过串口）'
+<CommandInputPopup>:
+    title: '功能二：自定义命令包'
     title_font: app.font_name
     title_size: sp(15)
     title_color: app.COLOR_PRIMARY_DARK
     separator_color: app.COLOR_LINE
-    size_hint: 0.95, 0.86
+    size_hint: 0.95, 0.84
     BoxLayout:
         orientation: 'vertical'
         spacing: dp(6)
         padding: dp(6)
 
+        Label:
+            text: '示例：HFUT / MECH / GREAT，或直接填十六进制命令包（如 AA55020002）'
+            font_name: app.font_name
+            font_size: sp(11)
+            color: app.COLOR_TEXT_WEAK
+            halign: 'left'
+            valign: 'top'
+            text_size: self.size
+            size_hint_y: None
+            height: dp(32)
+
         TextInput:
-            id: at_input
+            id: cmd_input
             text: root.command
             font_name: app.font_name
             font_size: sp(13)
@@ -560,37 +542,29 @@
             orientation: 'horizontal'
             spacing: dp(6)
             size_hint_y: None
-            height: dp(38)
+            height: dp(44)
             RoundButton:
-                text: 'AUTH?'
-                font_size: sp(11)
-                on_release: root.quick('AT+AUTH?')
+                text: 'HFUT'
+                font_size: sp(12)
+                on_release: root.quick('HFUT')
             RoundButton:
-                text: 'AUTH=0'
-                font_size: sp(11)
-                on_release: root.quick('AT+AUTH=0')
+                text: 'MECH'
+                font_size: sp(12)
+                on_release: root.quick('MECH')
             RoundButton:
-                text: 'ECHO=1'
-                font_size: sp(11)
-                on_release: root.quick('AT+ECHO=1')
-            RoundButton:
-                text: 'STATUS=1'
-                font_size: sp(11)
-                on_release: root.quick('AT+STATUS=1')
+                text: 'GREAT'
+                font_size: sp(12)
+                on_release: root.quick('GREAT')
 
         BoxLayout:
             orientation: 'horizontal'
             spacing: dp(6)
             size_hint_y: None
-            height: dp(40)
+            height: dp(44)
             RoundButton:
                 text: '发送'
                 font_size: sp(13)
                 on_release: root.send()
-            RoundButton:
-                text: '重启模块'
-                font_size: sp(12)
-                on_release: root.quick('AT+RESTART')
             RoundButton:
                 text: '关闭'
                 font_size: sp(13)
@@ -601,11 +575,14 @@
             font_name: app.font_name
             font_size: sp(11)
             color: app.COLOR_TEXT_WEAK
+            halign: 'left'
+            valign: 'top'
+            text_size: self.size
             size_hint_y: None
-            height: dp(18)
+            height: dp(32)
 
         BoxLayout:
-            id: at_reply
+            id: cmd_reply
             orientation: 'vertical'
             spacing: dp(2)
 
@@ -723,7 +700,7 @@
     title_size: sp(16)
     title_color: app.COLOR_PRIMARY_DARK
     separator_color: app.COLOR_LINE
-    size_hint: 0.94, 0.8
+    size_hint: 0.94, 0.9
     BoxLayout:
         orientation: 'vertical'
         spacing: dp(8)
@@ -758,6 +735,35 @@
                 spacing: dp(6)
                 size_hint_y: None
                 height: self.minimum_height
+        Label:
+            id: module_state
+            text: '模块信息（AT 通道读取）：准备中…'
+            font_name: app.font_name
+            font_size: sp(11)
+            color: app.COLOR_PRIMARY_DARK
+            halign: 'left'
+            valign: 'top'
+            text_size: self.size
+            size_hint_y: None
+            height: dp(18)
+        DiagLine:
+            id: svc_diag_1
+            text: '固件版本：未查询'
+        DiagLine:
+            id: svc_diag_2
+            text: '设备角色：未查询'
+        DiagLine:
+            id: svc_diag_3
+            text: '串口波特率：未查询'
+        DiagLine:
+            id: svc_diag_4
+            text: '状态显示：未查询'
+        DiagLine:
+            id: svc_diag_5
+            text: '用户鉴权：未查询'
+        DiagLine:
+            id: svc_diag_6
+            text: '设备名称：未查询'
         BoxLayout:
             orientation: 'horizontal'
             spacing: dp(8)
@@ -765,15 +771,19 @@
             height: dp(44)
             RoundButton:
                 text: '重新发现'
-                font_size: sp(12)
+                font_size: sp(11)
                 on_release: root.retry_discovery()
             RoundButton:
                 text: '复制列表'
-                font_size: sp(12)
+                font_size: sp(11)
                 on_release: root.copy_list()
             RoundButton:
+                text: '刷新信息'
+                font_size: sp(11)
+                on_release: root.refresh_module_info()
+            RoundButton:
                 text: '关闭'
-                font_size: sp(12)
+                font_size: sp(11)
                 on_release: root.dismiss()
 
 <ReplyHistoryPopup>:
