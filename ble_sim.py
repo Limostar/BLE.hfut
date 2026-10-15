@@ -70,6 +70,7 @@ class SimulatedBleManager(object):
         self._pending_received = []
         self._at_state = NOTIFY_OFF
         self._pending_at = []
+        self.at_commands = []
 
     # ------------------------------------------------------------------
     # 扫描
@@ -189,6 +190,7 @@ class SimulatedBleManager(object):
                 query = bytes(bytearray.fromhex(text)).decode('utf-8', 'replace').strip()
             except ValueError:
                 query = ''
+            self.at_commands.append(query)          # 供测试/预览查看发过哪些 AT 指令
             reply = SIM_AT_REPLIES.get(query, 'OK\r\n')
             self._pending_at.append(to_hex(reply.encode('utf-8')))
             return True, ''

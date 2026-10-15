@@ -37,6 +37,17 @@ def example_by_name(name):
     """按示例名称查表；查不到返回 None（大小写不敏感）。"""
     return EXAMPLE_BY_NAME.get((name or '').strip().upper())
 
+
+# 「启动」「停止」两个固定命令包：直接以十六进制原文下发（5 字节）
+#   下发到数据通道 6E400002，与其它命令走同一条路。
+CMD_START_HEX = '5401008031'
+CMD_STOP_HEX = '54010140F0'
+
+CMD_PRESETS = (
+    ('启动', CMD_START_HEX),
+    ('停止', CMD_STOP_HEX),
+)
+
 # 单次写入的载荷上限：蓝牙默认 MTU=23，减去 3 字节 ATT 协议头，即 20 字节。
 # 超过这个长度需要先协商 MTU 再分片，当前版本会明确提示而不是静默失败。
 MAX_PAYLOAD = 20
