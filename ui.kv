@@ -220,9 +220,7 @@
         color: 1, 1, 1, 1 if not root.disabled else 0.75
         halign: 'center'
         valign: 'middle'
-        text_size: root.size
-        size: root.size
-        pos: root.pos
+        text_size: self.size
 
 # 底部导航按钮
 <TabButton>:
@@ -238,9 +236,7 @@
         color: (1, 1, 1, 1) if root.active else (0.38, 0.46, 0.41, 1)
         halign: 'center'
         valign: 'middle'
-        text_size: root.size
-        size: root.size
-        pos: root.pos
+        text_size: self.size
 
 # 未登录时盖在模块上的半透明灰色遮罩
 <GateOverlay>:
@@ -332,10 +328,20 @@
 # ======================================================================
 
 <DisplayPanel>:
-    color_a: app.GRAD_NAVY_A
-    color_b: app.GRAD_NAVY_B
-    radius: dp(14)
-    border_color: 0.40, 0.78, 0.98, 0.55
+    orientation: 'vertical'
+    canvas.before:
+        Color:
+            rgba: 1, 1, 1, 1
+        RoundedRectangle:
+            texture: app.navy_gradient
+            pos: self.pos
+            size: self.size
+            radius: [dp(14)]
+        Color:
+            rgba: 0.40, 0.78, 0.98, 0.55
+        Line:
+            width: 1.2
+            rounded_rectangle: self.x, self.y, self.width, self.height, dp(14)
     BoxLayout:
         orientation: 'vertical'
         padding: dp(10), dp(8), dp(8), dp(8)
@@ -650,6 +656,8 @@
                 radius: dp(16)
                 size_hint_y: None
                 height: dp(84)
+                padding: dp(20), dp(14)
+                spacing: dp(4)
                 Label:
                     text: ('当前用户：%s' % app.current_user) if app.logged_in else '未登录'
                     font_name: app.font_name
@@ -661,8 +669,6 @@
                     text_size: self.size
                     size_hint_y: None
                     height: dp(30)
-                    pos_hint: {'x': 0.06, 'center_y': 0.62}
-                    size_hint_x: 0.9
                 Label:
                     text: '已解锁「控制」「记录」' if app.logged_in else '完成登录后自动解锁全部模块'
                     font_name: app.font_name
@@ -673,8 +679,6 @@
                     text_size: self.size
                     size_hint_y: None
                     height: dp(24)
-                    pos_hint: {'x': 0.06, 'center_y': 0.28}
-                    size_hint_x: 0.9
 
             Widget:
                 size_hint_y: None

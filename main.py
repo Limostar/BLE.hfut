@@ -148,6 +148,25 @@ def spaced_hex(hex_text):
     return ' '.join(hex_text[i:i + 2] for i in range(0, len(hex_text), 2))
 
 
+def fit_text_width(text, width):
+    """按可用宽度把一行截断（中文按 1 个字宽、ASCII 按 0.55 估）。
+
+    为什么要截断：这些列表每行高度是固定的，如果文字自动换行，第二行会被
+    裁掉且**看不出来**。截断后一定单行显示，"看不全"是明确可见的。
+    """
+    if width <= 0:
+        return text
+    limit = max(8.0, width / float(sp(11)))
+    cost = 0.0
+    out = []
+    for char in text:
+        cost += 1.0 if ord(char) > 0x2E80 else 0.55
+        if cost > limit:
+            return ''.join(out) + '…'
+        out.append(char)
+    return ''.join(out)
+
+
 # 帧的拼装与解析统一在 protocol.py 里实现（App、桌面模拟器、测试脚本共用同一份，
 # 避免两边规则漂移），这里只做导入。要改帧格式就改 protocol.py 的 build_frame()。
 
@@ -253,8 +272,13 @@ class _GradientCanvas(object):
                                width=dp(1.2)))
 
 
-class GradientPanel(FloatLayout, _GradientCanvas):
-    """带线性渐变背景的容器；子部件用 pos_hint / size_hint 自由摆放。"""
+class GradientPanel(BoxLayout, _GradientCanvas):
+    """带线性渐变背景的容器。
+
+    必须用 BoxLayout：这个 Kivy 版本里，自定义 FloatLayout 型容器会把子部件的
+    局部坐标设成**父容器自己的坐标**（双重偏移），导致内容整体错位——显示屏内容
+    下移约 250dp、按钮文字被推出按钮外。BoxLayout 没有这个问题。
+    """
 
     color_a = ListProperty(GRAD_NAVY_A)
     color_b = ListProperty(GRAD_NAVY_B)
@@ -263,6 +287,7 @@ class GradientPanel(FloatLayout, _GradientCanvas):
     border_color = ListProperty([0, 0, 0, 0])
 
     def __init__(self, **kwargs):
+        kwargs.setdefault('orientation', 'vertical')
         super(GradientPanel, self).__init__(**kwargs)
         self._init_gradient()
 
@@ -322,10 +347,14 @@ class LogEntryRow(Label):
     """日志详情弹窗里的一行。"""
 
 
-class DisplayPanel(GradientPanel):
-    """深蓝渐变"显示屏"：白色提示文字，右侧一根可拖拽的滑块。
+class DisplayPanel(BoxLayout):
+    """深蓝渐变"显示屏"：白字日志，右侧一根可拖拽的滑块。
 
-    内容来自 App.display_lines，所以登录/退出/清屏都能统一控制。
+    这里刻意用 **BoxLayout** 而不是自定义的 FloatLayout 容器：
+    实测把内容放进 FloatLayout 型渐变容器里时，背景画在正确位置、
+    内容却整体下移约 250dp（面板上方留白、文字挤到中部）。换成 BoxLayout
+    后由 Kivy 常规布局接管，位置稳定。
+    渐变底图在 ui.kv 的 canvas.before 里用 app.navy_gradient 画。
     """
 
     def on_kv_post(self, _base_widget):
@@ -360,27 +389,17 @@ class DisplayPanel(GradientPanel):
 
     @staticmethod
     def fit_width(text, width):
-        """按可见宽度把一行截断（中文按 1 个字宽、ASCII 按 0.55 估）。
+        return fit_text_width(text, width)
 
-        为什么要截断：每行高度是固定的 dp(20)，如果文字自动换行，第二行会
-        被裁掉且**看不出来**。截断后一定单行显示，"看不全"是明确可见的。
-        """
-        if width <= 0:
-            return text
-        limit = max(8.0, width / float(sp(11)))
-        cost = 0.0
-        out = []
-        for char in text:
-            cost += 1.0 if ord(char) > 0x2E80 else 0.55
-            if cost > limit:
-                return ''.join(out) + '…'
-            out.append(char)
-        return ''.join(out)
+    def text_width(self):
+        """日志文字的可用宽度；还没排版时先估一个（宽度定了会再渲染一次）。"""
+        width = self.ids.dp_scroll.width - dp(6)
+        return width if width >= dp(120) else dp(280)
 
     def _render(self, *args):
         box = self.ids.dp_lines
         box.clear_widgets()
-        width = self.ids.dp_scroll.width - dp(6)
+        width = self.text_width()
         lines = list(App.get_running_app().display_lines)
         if not lines:
             box.add_widget(ScreenLine(
@@ -536,6 +555,8 @@ class ServicesPopup(Popup):
         super(ServicesPopup, self).__init__(**kwargs)
         self._ble = ble
         self._diag = None
+        # 同上：建好先填一次服务列表，别等 on_open
+        self.refresh_list()
 
     def on_open(self, *args):
         super(ServicesPopup, self).on_open(*args)
@@ -661,10 +682,29 @@ class LogDetailPopup(Popup):
         super(LogDetailPopup, self).__init__(title=title, **kwargs)
         self._lines = list(lines)
         self._note = note
+        self._last_width = -1.0
+        # 建好就立刻填内容：on_open 会延迟约 0.6 秒才派发，
+        # 只靠它会出现"弹窗已经打开、列表却是空的"。
+        self.refresh_list()
+        self.ids.log_scroll.bind(width=self._on_view_width)
 
     def on_open(self, *args):
         super(LogDetailPopup, self).on_open(*args)
         self.refresh_list()
+
+    def _on_view_width(self, _widget, value):
+        if abs(value - self._last_width) < 1:
+            return
+        self._last_width = value
+        self.refresh_list()
+
+    def text_width(self):
+        """日志文字的可用宽度；还没排版时按常见弹窗宽度估一个。
+
+        宽度确定后 _on_view_width 会再渲染一次，所以这里的估值只是过渡。
+        """
+        width = self.ids.log_scroll.width - dp(10)
+        return width if width >= dp(120) else dp(320)
 
     def refresh_list(self):
         try:
@@ -676,9 +716,11 @@ class LogDetailPopup(Popup):
         if not self._lines:
             box.add_widget(LogEntryRow(text='（暂无记录）'))
             return
+        # 按实际宽度截断：行高固定，文字换行会被裁掉且看不出来
+        width = self.text_width()
         # 按时间顺序添加：最早的在最上面，最新的在最下面（像终端一样）
         for line in self._lines:
-            box.add_widget(LogEntryRow(text=clip_line(line, 50)))
+            box.add_widget(LogEntryRow(text=fit_text_width(line, width)))
         Clock.schedule_once(self._scroll_to_bottom, 0)
         Clock.schedule_once(self._scroll_to_bottom, 0.15)
 
@@ -1288,9 +1330,13 @@ class BleAssistantApp(App):
     GRAD_TAB_A = ListProperty(GRAD_TAB_A)
     GRAD_TAB_B = ListProperty(GRAD_TAB_B)
 
+    # 显示屏的渐变底图（在 KV 的 canvas.before 里用，避免自定义布局类的定位问题）
+    navy_gradient = ObjectProperty(None, allownone=True)
+
     def build(self):
         self.font_name = register_cjk_font()
         self.ble = create_ble_manager()
+        self.navy_gradient = gradient_texture(GRAD_NAVY_A, GRAD_NAVY_B)
         self.store = AccountStore(os.path.join(self.user_data_dir, 'accounts.db'))
         self._parser = RxFrameParser()
         self._notify_subscribed = False
