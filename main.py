@@ -39,8 +39,8 @@ from kivy.uix.widget import Widget
 from kivy.utils import platform
 
 from accounts import AccountStore
-from protocol import (CMD_FUNC_1, CMD_PRESETS, MAX_PAYLOAD, RxFrameParser,
-                      build_frame, decode_text, example_by_name, to_hex)
+from protocol import (CMD_PRESETS, MAX_PAYLOAD, RxFrameParser,
+                      decode_text, to_hex)
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 KV_FILE = os.path.join(APP_DIR, 'ui.kv')
@@ -106,7 +106,9 @@ ESP32_AT_UUID = '6e400004-b5a3-f393-e0a9-e50e24dcca9e'
 ESP32_AUTO_PICK_WRITE = False
 ESP32_AUTO_PICK_NOTIFY = False
 
-# 回传命令字 REPLY_FUNC_1、下发命令字 CMD_FUNC_1 都在 protocol.py 里约定
+# 命令字（CMD_* / REPLY_*）与帧格式都在 protocol.py 里约定
+# 命令帧格式：[0xAA][0x55][命令字][数据长度][数据...][异或校验]
+# 「启动」「停止」两个命令包不走这个帧格式，是直接以十六进制原文下发的。
 
 # 通知订阅状态（与 ble_android.py / BleHelper.java 保持一致）
 NOTIFY_OFF, NOTIFY_SUBSCRIBING, NOTIFY_SUBSCRIBED, NOTIFY_FAILED = 0, 1, 2, 3
@@ -387,11 +389,19 @@ class DisplayPanel(GradientPanel):
         # 按时间顺序加入 → 最早的在最上面、最新的在最下面（像终端一样）
         for line in lines:
             box.add_widget(ScreenLine(text=self.fit_width(line, width)))
-        Clock.schedule_once(self._scroll_to_bottom, 0.1)
+        # 每次都把最新一条滚到可见处（终端式）
+        Clock.schedule_once(self._scroll_to_bottom, 0)
+        Clock.schedule_once(self._scroll_to_bottom, 0.15)
 
     def _scroll_to_bottom(self, _dt):
         try:
-            self.ids.dp_scroll.scroll_y = 0.0       # 0 = 最底部（最新一条）
+            scroll = self.ids.dp_scroll
+            rows = self.ids.dp_lines.children
+            if rows:
+                # rows[0] 是最后加入的那条 = 最新一条
+                scroll.scroll_to(rows[0], padding=0, animate=False)
+            else:
+                scroll.scroll_y = 0.0
         except Exception:                                       # noqa: BLE001
             pass
 
@@ -669,45 +679,42 @@ class LogDetailPopup(Popup):
         # 按时间顺序添加：最早的在最上面，最新的在最下面（像终端一样）
         for line in self._lines:
             box.add_widget(LogEntryRow(text=clip_line(line, 50)))
-        Clock.schedule_once(self._scroll_to_bottom, 0.3)
+        Clock.schedule_once(self._scroll_to_bottom, 0)
+        Clock.schedule_once(self._scroll_to_bottom, 0.15)
 
     def _scroll_to_bottom(self, _dt):
         try:
-            self.ids.log_scroll.scroll_y = 0.0
+            scroll = self.ids.log_scroll
+            rows = self.ids.log_list.children
+            if rows:
+                scroll.scroll_to(rows[0], padding=0, animate=False)   # rows[0] = 最新
+            else:
+                scroll.scroll_y = 0.0
         except Exception:                                       # noqa: BLE001
             pass
 
 
 class CommandInputPopup(Popup):
-    """「开发者」：用户自己输入命令包并发送，回传同时进显示屏和弹窗。
+    """「开发者」：用户自己输入命令包并发送。
 
-    输入框接受两种写法：
-      - 示例名称：HFUT / MECH / GREAT（大小写都行，仅当 show_examples 打开时提示）
-      - 直接的十六进制命令包，例如 5401008031
-        （只要是偶数长度的十六进制即可，按原样写进数据通道）
+    输入框只接受**十六进制命令包**（偶数长度，例如 5401008031），按原样写进数据通道。
+    发送过程与模块的 AT 回复都会同步显示在「控制」页的显示屏上。
 
-    走的是数据通道（6E400002），与「启动」「停止」同一条路。
+    注意：这里已经**没有** HFUT / MECH / GREAT 示例快捷键了 —— 之前只是把它们
+    的 opacity 设成 0，按钮本身还在原位、依然能点到，所以直接不再创建它们。
     """
 
-    command = StringProperty('HFUT')
-    state = StringProperty('输入十六进制命令包，再点「发送」。')
-    show_examples = BooleanProperty(True)
+    command = StringProperty('')
+    state = StringProperty('输入十六进制命令包（偶数长度，如 5401008031），再点「发送」。')
     MAX_ROWS = 5
 
-    def __init__(self, ble, on_closed=None, show_examples=True, **kwargs):
-        kwargs.setdefault('show_examples', show_examples)
+    def __init__(self, ble, on_closed=None, **kwargs):
         super(CommandInputPopup, self).__init__(**kwargs)
         self._ble = ble
         self._on_closed = on_closed
         self._lines = []
         self._timer = None
         self._deadline = 0.0
-        if show_examples:
-            self.command = 'HFUT'
-            self.state = '输入示例名称（HFUT / MECH / GREAT）或十六进制命令包，再点「发送」。'
-        else:
-            self.command = ''
-            self.state = '输入十六进制命令包（偶数长度，如 5401008031），再点「发送」。'
 
     # ------------------------------------------------------------------
     def on_open(self, *args):
@@ -719,29 +726,19 @@ class CommandInputPopup(Popup):
         except Exception:                                       # noqa: BLE001
             pass
 
-    def quick(self, name):
-        """示例快捷按钮：填好名称后直接发送。"""
-        self.command = name
-        self.send()
-
     def _resolve(self, text):
         """输入 → (命令包十六进制, 说明)；无法识别时返回 (None, 原因)。"""
         raw = (text or '').strip()
         if not raw:
             return None, '请先输入命令内容。'
-        example = example_by_name(raw) if self.show_examples else None
-        if example is not None:
-            cmd, _reply_cmd, reply_text = example
-            return (to_hex(build_frame(cmd)),
-                    '示例 %s（命令字 0x%02X，设备将回传 %s）'
-                    % (raw.upper(), cmd, reply_text))
         compact = raw.replace(' ', '').replace('-', '').upper()
         if (len(compact) >= 2 and len(compact) % 2 == 0
                 and all(ch in '0123456789ABCDEF' for ch in compact)):
             return compact, '自定义命令包（%d 字节）' % (len(compact) // 2)
-        return None, '无法识别：请输入偶数长度的十六进制命令包。'
+        return None, '无法识别：请输入偶数长度的十六进制命令包（如 5401008031）。'
 
     def send(self):
+        app = App.get_running_app()
         hex_data, note = self._resolve(self.command)
         if hex_data is None:
             self.state = note
@@ -750,6 +747,10 @@ class CommandInputPopup(Popup):
             self.state = '命令包 %d 字节，超过单次写入上限 %d 字节。' % (
                 len(hex_data) // 2, MAX_PAYLOAD)
             return
+        if not app.connected:
+            self.state = '未连接设备：请先回「控制」页连接 BLE 设备。'
+            return
+
         self._lines = []
         self._render()
         accepted, message = self._ble.send_command(ESP32_SERVICE_UUID,
@@ -758,9 +759,15 @@ class CommandInputPopup(Popup):
                                                    auto_pick=ESP32_AUTO_PICK_WRITE)
         if not accepted:
             self.state = '下发失败：%s' % message
+            app.log_line('✗ 开发者 下发失败：%s' % (message or '未知原因'))
             return
+
+        # 和「启动」「停止」一样：发送动作本身也要在显示屏上留痕
+        app.log_line('→ 已发送 开发者（%d 字节）：%s'
+                     % (len(hex_data) // 2, spaced_hex(hex_data)))
         self.state = '已发送 %s，等待写入完成…' % note
-        App.get_running_app().ping_module()
+        if not app.ping_module():
+            app.log_line('（AT 通道未就绪，本次没有做模块在线确认）')
         self._deadline = time.monotonic() + WRITE_TIMEOUT
         if self._timer is not None:
             self._timer.cancel()
@@ -770,15 +777,19 @@ class CommandInputPopup(Popup):
         state, message = self._ble.write_state()
         if state == WRITE_SUCCESS:
             self._stop_poll()
-            self.state = '命令已写入设备，等待回传…'
+            self.state = '命令已写入设备，等待模块回复…'
+            App.get_running_app().log_line('开发者：命令已写入设备')
             return
         if state == WRITE_FAILED:
             self._stop_poll()
             self.state = '写入失败：%s' % (message or '未知原因')
+            App.get_running_app().log_line('✗ 开发者 写入失败：%s'
+                                           % (message or '未知原因'))
             return
         if time.monotonic() >= self._deadline:
             self._stop_poll()
             self.state = '写入超时，请检查连接后重试。'
+            App.get_running_app().log_line('✗ 开发者 写入超时')
 
     def add_reply(self, cmd, text, raw_hex):
         """把收到的设备回传追加进弹窗（由主界面转发过来）。"""
@@ -855,6 +866,7 @@ class ModuleConfigRunner(object):
         if state != NOTIFY_SUBSCRIBED:
             return False
         self._elapsed = 0.0
+        App.get_running_app().register_at_sink(self.on_at_chunk)
         self._timer = Clock.schedule_interval(self._step, 0.45)
         return True
 
@@ -862,16 +874,16 @@ class ModuleConfigRunner(object):
         if self._timer is not None:
             self._timer.cancel()
             self._timer = None
+        try:
+            App.get_running_app().unregister_at_sink(self.on_at_chunk)
+        except Exception:                                       # noqa: BLE001
+            pass
+
+    def on_at_chunk(self, text):
+        self._replies.append(text)
 
     def _step(self, dt):
         self._elapsed += dt
-        for chunk in self._ble.pop_received_at():
-            try:
-                text = bytes(bytearray.fromhex(str(chunk))).decode('utf-8', 'replace')
-            except ValueError:
-                continue
-            self._replies.append(text)
-            App.get_running_app().on_at_reply(text)
         if self._sent < len(MODULE_SETUP_COMMANDS):
             command = MODULE_SETUP_COMMANDS[self._sent]
             self._sent += 1
@@ -918,6 +930,7 @@ class ModuleDiagRunner(object):
             self._emit_lines(['%s：%s' % (name, BAD_OUTPUT)
                               for _key, name in AT_QUERY_LABELS])
             return False
+        App.get_running_app().register_at_sink(self.on_at_chunk)
         self._progress('读取模块信息 0/6')
         self._emit_lines(['%s：查询中…' % name for _key, name in AT_QUERY_LABELS])
         self._timer = Clock.schedule_interval(self._step, 0.35)
@@ -927,10 +940,21 @@ class ModuleDiagRunner(object):
         if self._timer is not None:
             self._timer.cancel()
             self._timer = None
+        try:
+            App.get_running_app().unregister_at_sink(self.on_at_chunk)
+        except Exception:                                       # noqa: BLE001
+            pass
+
+    def on_at_chunk(self, text):
+        """收到一段模块 AT 回复（由 App 统一分发过来）。"""
+        self._at_bytes += len(text.encode('utf-8', 'replace'))
+        for line in text.replace('\r', '').split('\n'):
+            line = line.strip()
+            if line:
+                self._replies_text.append(line)
 
     def _step(self, dt):
         self._elapsed += dt
-        self._collect()
         self._emit_lines()
         if self._sent < len(AT_QUERIES):
             query = AT_QUERIES[self._sent]
@@ -942,20 +966,6 @@ class ModuleDiagRunner(object):
         if self._elapsed > len(AT_QUERIES) * 0.35 + 2.5:
             self.stop()
             self._done()
-
-    def _collect(self):
-        for chunk in self._ble.pop_received_at():
-            try:
-                raw = bytes(bytearray.fromhex(chunk))
-            except ValueError:
-                continue
-            self._at_bytes += len(raw)
-            text = raw.decode('utf-8', 'replace').replace('\r', '')
-            for line in text.split('\n'):
-                line = line.strip()
-                if line:
-                    self._replies_text.append(line)
-                    App.get_running_app().on_at_reply(line)
 
     def value_of(self, key):
         for text in self._replies_text:
@@ -1105,14 +1115,13 @@ class CtrlScreen(Screen):
         self.send_hex(name, hex_data)
 
     def open_developer(self):
-        """「开发者」：自定义命令包输入框（不带示例快捷键）。"""
+        """「开发者」：自定义命令包输入框。"""
         app = App.get_running_app()
         if not app.connected:
             show_info('未连接', '请先连接 BLE 设备，再下发命令。')
             return
         self._cmd_popup = CommandInputPopup(ble=app.ble,
-                                            on_closed=self._on_cmd_popup_closed,
-                                            show_examples=False)
+                                            on_closed=self._on_cmd_popup_closed)
         self._cmd_popup.open()
 
     def _on_cmd_popup_closed(self):
@@ -1288,6 +1297,7 @@ class BleAssistantApp(App):
         self._at_subscribed = False
         self._module_configured = False
         self._at_busy = False
+        self._at_sinks = []
         self._config_runner = None
         self._poll = None
 
@@ -1377,7 +1387,43 @@ class BleAssistantApp(App):
             self.log_line('● 已连接设备' if connected else '○ 已断开连接')
 
         self._keep_notify(ble, connected)
+        self._drain_at(ble)
         self._drain_incoming(ble)
+
+    # ------------------------------------------------------------------
+    # AT 通道：始终有人读，收到就上显示屏
+    # ------------------------------------------------------------------
+    def register_at_sink(self, callback):
+        """把"正在等 AT 回复"的组件登记进来（自动锁定配置、服务页读模块信息）。"""
+        if callback not in self._at_sinks:
+            self._at_sinks.append(callback)
+
+    def unregister_at_sink(self, callback):
+        if callback in self._at_sinks:
+            self._at_sinks.remove(callback)
+
+    def _drain_at(self, ble):
+        """AT 通道只有一个读口，统一在这里取，再分发给登记的组件。
+
+        之前是由各个组件自己去 pop_received_at()，结果没有组件在跑的时候
+        （比如自动配置做完之后）模块回的 AT 回复就没人取，显示屏上永远看不到
+        「收到 AT 回复」。
+        """
+        chunks = ble.pop_received_at()
+        if not chunks:
+            return
+        for chunk in chunks:
+            try:
+                text = bytes(bytearray.fromhex(str(chunk))).decode('utf-8', 'replace')
+            except ValueError:
+                Logger.warning('BleAssistant: 收到非十六进制 AT 数据，已跳过')
+                continue
+            self.on_at_reply(text)
+            for sink in list(self._at_sinks):
+                try:
+                    sink(text)
+                except Exception:                               # noqa: BLE001
+                    Logger.exception('BleAssistant: AT 回复分发失败')
 
     def _keep_notify(self, ble, connected):
         """连上就自动订阅回传通知与 AT 通道；订阅幂等，没成功会在下一轮重试。"""

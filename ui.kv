@@ -357,13 +357,15 @@
             ScrollView:
                 id: dp_scroll
                 do_scroll_x: False
-                bar_width: 0
+                bar_width: dp(4)
                 GridLayout:
                     id: dp_lines
                     cols: 1
                     spacing: dp(2)
                     size_hint_y: None
-                    height: self.minimum_height
+                    # 至少撑满可视区：内容少时顶部对齐（否则 Kivy 会把它顶到底部，
+                    # 上方留一大片空白、整体还会往下偏）
+                    height: max(self.minimum_height, self.parent.height)
             Slider:
                 id: dp_slider
                 orientation: 'vertical'
@@ -984,7 +986,7 @@
                 cols: 1
                 spacing: dp(6)
                 size_hint_y: None
-                height: self.minimum_height
+                height: max(self.minimum_height, self.parent.height)
         Label:
             id: module_state
             text: '模块信息（AT 通道读取）：准备中…'
@@ -1066,7 +1068,7 @@
                 cols: 1
                 spacing: dp(4)
                 size_hint_y: None
-                height: self.minimum_height
+                height: max(self.minimum_height, self.parent.height)
         RoundButton:
             text: '关 闭'
             on_release: root.dismiss()
@@ -1103,25 +1105,6 @@
             size_hint_y: None
             height: dp(44)
             on_text: root.command = self.text
-
-        BoxLayout:
-            orientation: 'horizontal'
-            spacing: dp(6)
-            size_hint_y: None
-            height: dp(44) if root.show_examples else 0
-            opacity: 1 if root.show_examples else 0
-            RoundButton:
-                text: 'HFUT'
-                font_size: sp(12)
-                on_release: root.quick('HFUT')
-            RoundButton:
-                text: 'MECH'
-                font_size: sp(12)
-                on_release: root.quick('MECH')
-            RoundButton:
-                text: 'GREAT'
-                font_size: sp(12)
-                on_release: root.quick('GREAT')
 
         BoxLayout:
             orientation: 'horizontal'
