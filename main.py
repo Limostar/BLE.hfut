@@ -17,8 +17,8 @@ from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.text import LabelBase
 from kivy.core.window import Window
-from kivy.graphics import (Color, Ellipse, Line, Rectangle, RoundedRectangle,
-                           StencilPop, StencilPush, StencilUnUse, StencilUse)
+from kivy.graphics import (Color, Ellipse, InstructionGroup, Line, Rectangle,
+                           RoundedRectangle)
 from kivy.graphics.texture import Texture
 from kivy.lang import Builder
 from kivy.logger import Logger
@@ -201,9 +201,16 @@ def gradient_texture(color_a, color_b, steps=48, vertical=False):
 
 
 class _GradientCanvas(object):
-    """渐变底图绘制逻辑（供 FloatLayout / 按钮复用）。"""
+    """渐变底图绘制逻辑（供 FloatLayout / 按钮复用）。
+
+    关键点：底图必须画在**自己的一个 InstructionGroup** 里，不能用
+    `self.canvas.clear()` —— Kivy 会把子部件的 canvas 挂到父部件的 canvas 下，
+    一旦 clear() 就会把子 Label 的 canvas 一起清掉，字就全不显示了。
+    """
 
     def _init_gradient(self):
+        self._bg = InstructionGroup()
+        self.canvas.add(self._bg)
         self.bind(pos=self._draw_gradient, size=self._draw_gradient)
         self.bind(color_a=self._draw_gradient, color_b=self._draw_gradient,
                   circle=self._draw_gradient, radius=self._draw_gradient,
@@ -216,32 +223,32 @@ class _GradientCanvas(object):
         return (self.center_x - side / 2.0, self.center_y - side / 2.0, side, side)
 
     def _draw_gradient(self, *args):
-        self.canvas.clear()
+        group = getattr(self, '_bg', None)
+        if group is None:
+            return
+        group.clear()
         if self.width <= 0 or self.height <= 0:
             return
         texture = gradient_texture(self.color_a, self.color_b)
-        x, y, width, height = self._shape_rect() if self.circle else \
-            (self.x, self.y, self.width, self.height)
-        with self.canvas:
-            Color(1, 1, 1, 1)
+        if self.circle:
+            x, y, width, height = self._shape_rect()
+        else:
+            x, y, width, height = self.x, self.y, self.width, self.height
+        group.add(Color(1, 1, 1, 1))
+        if self.circle:
+            # Ellipse 本身就能带纹理，不需要模板缓冲（stencil），更稳
+            group.add(Ellipse(texture=texture, pos=(x, y), size=(width, height)))
+        else:
+            group.add(RoundedRectangle(texture=texture, pos=(x, y),
+                                       size=(width, height), radius=[self.radius]))
+        if self.border_color[3] > 0:
+            group.add(Color(*self.border_color))
             if self.circle:
-                StencilPush()
-                Ellipse(pos=(x, y), size=(width, height))
-                StencilUse()
-                Rectangle(texture=texture, pos=(x, y), size=(width, height))
-                StencilUnUse()
-                StencilPop()
+                group.add(Line(circle=(x + width / 2.0, y + height / 2.0,
+                                       width / 2.0 - dp(1.5)), width=dp(2)))
             else:
-                RoundedRectangle(texture=texture, pos=(x, y), size=(width, height),
-                                 radius=[self.radius])
-            if self.border_color[3] > 0:
-                Color(*self.border_color)
-                if self.circle:
-                    Line(circle=(x + width / 2.0, y + height / 2.0,
-                                 width / 2.0 - dp(1.5)), width=dp(2))
-                else:
-                    Line(rounded_rectangle=(x, y, width, height, self.radius),
-                         width=dp(1.2))
+                group.add(Line(rounded_rectangle=(x, y, width, height, self.radius),
+                               width=dp(1.2)))
 
 
 class GradientPanel(FloatLayout, _GradientCanvas):
@@ -280,7 +287,33 @@ class ScreenLine(Label):
 
 
 class GateOverlay(FloatLayout):
-    """未登录时盖在模块上的半透明灰色遮罩。"""
+    """未登录时盖在模块上的半透明灰色遮罩。
+
+    注意：Kivy 里"什么都不画的容器"是**不消费触摸**的，点击会直接穿透到
+    下面的按钮。所以这里必须显式把落在自己范围内的触摸吃掉。
+    """
+
+    def gate_active(self):
+        """未登录时遮罩生效（显示 + 挡点击）。"""
+        try:
+            return not App.get_running_app().logged_in
+        except Exception:                                       # noqa: BLE001
+            return True
+
+    def on_touch_down(self, touch):
+        if self.gate_active() and self.collide_point(*touch.pos):
+            return True                 # 吃掉点击，不再往下传
+        return super(GateOverlay, self).on_touch_down(touch)
+
+    def on_touch_move(self, touch):
+        if self.gate_active() and self.collide_point(*touch.pos):
+            return True
+        return super(GateOverlay, self).on_touch_move(touch)
+
+    def on_touch_up(self, touch):
+        if self.gate_active() and self.collide_point(*touch.pos):
+            return True
+        return super(GateOverlay, self).on_touch_up(touch)
 
 
 class LogEntryRow(Label):
@@ -295,8 +328,11 @@ class DisplayPanel(GradientPanel):
 
     def on_kv_post(self, _base_widget):
         self._syncing = False
+        self._last_width = -1.0
         self.ids.dp_slider.bind(value=self._on_slider)
         self.ids.dp_scroll.bind(scroll_y=self._on_scroll)
+        # 可见宽度变了要按新宽度重新截断（第一次渲染时可能还没排版过）
+        self.ids.dp_scroll.bind(width=self._on_view_width)
         App.get_running_app().bind(display_lines=self._render)
         self._render()
 
@@ -314,16 +350,43 @@ class DisplayPanel(GradientPanel):
         self.ids.dp_slider.value = value
         self._syncing = False
 
+    def _on_view_width(self, _widget, value):
+        if abs(value - self._last_width) < 1:
+            return          # 只有宽度真的变了才重排，避免和布局互相触发
+        self._last_width = value
+        self._render()
+
+    @staticmethod
+    def fit_width(text, width):
+        """按可见宽度把一行截断（中文按 1 个字宽、ASCII 按 0.55 估）。
+
+        为什么要截断：每行高度是固定的 dp(20)，如果文字自动换行，第二行会
+        被裁掉且**看不出来**。截断后一定单行显示，"看不全"是明确可见的。
+        """
+        if width <= 0:
+            return text
+        limit = max(8.0, width / float(sp(11)))
+        cost = 0.0
+        out = []
+        for char in text:
+            cost += 1.0 if ord(char) > 0x2E80 else 0.55
+            if cost > limit:
+                return ''.join(out) + '…'
+            out.append(char)
+        return ''.join(out)
+
     def _render(self, *args):
         box = self.ids.dp_lines
         box.clear_widgets()
+        width = self.ids.dp_scroll.width - dp(6)
         lines = list(App.get_running_app().display_lines)
         if not lines:
-            box.add_widget(ScreenLine(text='（暂无信息：连接设备后，收发记录都显示在这里）'))
+            box.add_widget(ScreenLine(
+                text=self.fit_width('（暂无信息：连接设备后，收发记录都在这里）', width)))
             return
         # 按时间顺序加入 → 最早的在最上面、最新的在最下面（像终端一样）
         for line in lines:
-            box.add_widget(ScreenLine(text=line))
+            box.add_widget(ScreenLine(text=self.fit_width(line, width)))
         Clock.schedule_once(self._scroll_to_bottom, 0.1)
 
     def _scroll_to_bottom(self, _dt):
