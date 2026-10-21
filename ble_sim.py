@@ -22,7 +22,7 @@ AT_UUID = '6e400004-b5a3-f393-e0a9-e50e24dcca9e'
 SIM_AT_REPLIES = {
     'AT+VERSION': 'AT+VERSION=2024.12.31\r\nOK\r\n',
     'AT+ROLE?': 'AT+ROLE=0 OK\r\n',
-    'AT+UART?': 'AT+UART=115200 OK\r\n',
+    'AT+UART?': 'AT+UART=115200 OK\r\n',      # 出厂值；App 下发 AT+UART= 后会按实际值回复
     'AT+STATUS?': 'AT+STATUS=1 OK\r\n',
     'AT+AUTH?': 'AT+AUTH=0,0000,15 OK\r\n',
     'AT+NAME?': 'AT+NAME=0,HFUT.BLE OK\r\n',
@@ -71,6 +71,8 @@ class SimulatedBleManager(object):
         self._at_state = NOTIFY_OFF
         self._pending_at = []
         self.at_commands = []
+        # 模块当前串口波特率（AT+UART= 改了之后，AT+UART? 要能查回来）
+        self._at_baud = 115200
 
     # ------------------------------------------------------------------
     # 扫描
@@ -191,7 +193,16 @@ class SimulatedBleManager(object):
             except ValueError:
                 query = ''
             self.at_commands.append(query)          # 供测试/预览查看发过哪些 AT 指令
-            reply = SIM_AT_REPLIES.get(query, 'OK\r\n')
+            if query.startswith('AT+UART='):
+                try:
+                    self._at_baud = int(query.split('=', 1)[1])
+                except ValueError:
+                    pass
+                reply = 'OK\r\n'
+            elif query == 'AT+UART?':
+                reply = 'AT+UART=%d OK\r\n' % self._at_baud
+            else:
+                reply = SIM_AT_REPLIES.get(query, 'OK\r\n')
             self._pending_at.append(to_hex(reply.encode('utf-8')))
             return True, ''
 

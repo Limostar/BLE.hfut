@@ -139,7 +139,8 @@ PRESET_HEX = dict(CMD_PRESETS)
 
 # 每次连上模块后，App 自动通过蓝牙 AT 通道锁定的模块配置
 #   —— 不需要任何电脑端脚本参与
-MODULE_TARGET_BAUD = 115200
+# 默认串口波特率 9600（「控制」页的「波特率」按钮可随时再用 AT+UART 改）
+MODULE_TARGET_BAUD = 9600
 MODULE_TARGET_NAME = 'HFUT.BLE'
 MODULE_SETUP_COMMANDS = ('AT+UART=%d' % MODULE_TARGET_BAUD,
                          'AT+NAME=0,%s' % MODULE_TARGET_NAME)
@@ -1024,6 +1025,89 @@ class CommandInputPopup(Popup):
             self._on_closed()
 
 
+class BaudRatePopup(Popup):
+    """「波特率」：输入框 + 9600 / 115200 两个预置值，用 AT+UART 实时改模块串口波特率。
+
+    AT+UART 是"立即生效、掉电保存"的（手册第 54 页）；它改的是模块与单片机之间
+    的串口速率，不影响 BLE 链路，所以模块的 AT 回复照样能收到。
+    每次连接 App 会自动把模块锁成 MODULE_TARGET_BAUD（9600）。
+    """
+
+    value = StringProperty('')
+    state = StringProperty('输入波特率后点「发送」；也可以直接点下面的预置值。')
+    MAX_ROWS = 4
+    MIN_BAUD, MAX_BAUD = 1200, 1000000
+
+    def __init__(self, ble, **kwargs):
+        super(BaudRatePopup, self).__init__(**kwargs)
+        self._ble = ble
+        self._lines = []
+        self._render()
+        # 模块的回复由 App 统一从 AT 通道取出来再分发（和「服务/特征」同一套机制）
+        try:
+            App.get_running_app().register_at_sink(self.on_at_chunk)
+        except Exception:                                       # noqa: BLE001
+            Logger.exception('BleAssistant: 波特率弹窗登记 AT 回复失败')
+
+    def on_dismiss(self, *args):
+        try:
+            App.get_running_app().unregister_at_sink(self.on_at_chunk)
+        except Exception:                                       # noqa: BLE001
+            pass
+        super(BaudRatePopup, self).on_dismiss(*args)
+
+    # ------------------------------------------------------------------
+    def on_at_chunk(self, text):
+        """模块对 AT+UART 的回复。"""
+        flat = ' '.join((text or '').split())
+        if not flat:
+            return
+        self._lines.append(clip_line(flat, 46))
+        self._render()
+        self.state = '模块回复：%s' % clip_line(flat, 22)
+
+    def choose(self, baud):
+        """点预置值：填进输入框并立即下发。"""
+        self.value = str(baud)
+        self.send()
+
+    def send(self):
+        raw = (self.value or '').strip()
+        if not raw.isdigit():
+            self.state = '请输入数字波特率（例如 9600）。'
+            return
+        baud = int(raw)
+        if baud < self.MIN_BAUD or baud > self.MAX_BAUD:
+            self.state = '波特率范围 %d ~ %d。' % (self.MIN_BAUD, self.MAX_BAUD)
+            return
+        app = App.get_running_app()
+        if not app.connected:
+            self.state = '未连接设备：请先回「控制」页连接 BLE 设备。'
+            return
+        if not getattr(app, '_at_subscribed', False):
+            self.state = 'AT 通道未就绪，请等连接完成后再试。'
+            return
+
+        command = 'AT+UART=%d' % baud
+        accepted, message = self._ble.send_command(
+            '', ESP32_AT_UUID, to_hex((command + '\r\n').encode('utf-8')))
+        if not accepted:
+            self.state = '下发失败：%s' % (message or '未知原因')
+            app.log_line('✗ 波特率 下发失败：%s' % (message or '未知原因'))
+            return
+        app.log_line('→ 已发送 波特率：%s' % command)
+        self._lines.append('→ ' + command)
+        self._render()
+        self.state = '已下发 %s，等待模块回复…' % command
+
+    def _render(self):
+        box = self.ids.baud_reply
+        box.clear_widgets()
+        lines = self._lines[-self.MAX_ROWS:] or ['（模块回复会显示在这里）']
+        for line in lines:
+            box.add_widget(PopupRow(text=line))
+
+
 # ----------------------------------------------------------------------
 # 模块诊断（AT 指令通道，只走蓝牙）
 # ----------------------------------------------------------------------
@@ -1049,7 +1133,7 @@ BAD_OUTPUT = '输出异常'
 
 
 class ModuleConfigRunner(object):
-    """连上模块后自动把它的配置锁定：串口波特率 115200 + 设备名 HFUT.BLE。
+    """连上模块后自动把它的配置锁定：串口波特率 9600 + 设备名 HFUT.BLE。
 
     走模块自带的 AT 指令通道（6E400004，只走蓝牙、不经过串口），
     因此完全不需要电脑端脚本参与。
@@ -1280,9 +1364,11 @@ class CtrlScreen(Screen):
     def __init__(self, **kwargs):
         super(CtrlScreen, self).__init__(**kwargs)
         self._cmd_popup = None
+        self._baud_popup = None
 
     def on_leave(self, *args):
         self._cmd_popup = None
+        self._baud_popup = None
 
     # ------------------------------------------------------------------
     # 蓝牙连接
@@ -1334,6 +1420,15 @@ class CtrlScreen(Screen):
 
     def _on_cmd_popup_closed(self):
         self._cmd_popup = None
+
+    def open_baudrate(self):
+        """「波特率」：用 AT+UART 实时改模块的串口波特率。"""
+        app = App.get_running_app()
+        if not app.connected:
+            show_info('未连接', '请先连接 BLE 设备，再修改模块波特率。')
+            return
+        self._baud_popup = BaudRatePopup(ble=app.ble)
+        self._baud_popup.open()
 
     def send_hex(self, name, hex_data):
         """把一段十六进制命令包写进数据通道，过程与结果都写进显示屏。"""
@@ -1712,7 +1807,7 @@ class BleAssistantApp(App):
             elif state != NOTIFY_SUBSCRIBING:
                 ble.enable_at_notify('', ESP32_AT_UUID)
 
-        # AT 通道就绪后，自动把模块锁成 115200 + HFUT.BLE（每次连接只做一次）
+        # AT 通道就绪后，自动把模块锁成 9600 + HFUT.BLE（每次连接只做一次）
         if (self._at_subscribed and not self._module_configured
                 and not self._at_busy):
             runner = ModuleConfigRunner(ble, on_done=self._on_module_configured)

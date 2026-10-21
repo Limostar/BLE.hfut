@@ -483,12 +483,12 @@
                     disabled: not app.connected
                     on_release: root.open_developer()
                 CircleButton:
-                    text: '功能四'
+                    text: '波特率'
                     font_size_hint: sp(12)
                     color_a: app.GRAD_FUNC_A
                     color_b: app.GRAD_FUNC_B
                     disabled: not app.connected
-                    on_release: root.reserved('功能四')
+                    on_release: root.open_baudrate()
                 CircleButton:
                     text: '功能五'
                     font_size_hint: sp(12)
@@ -1181,5 +1181,84 @@
 
         BoxLayout:
             id: cmd_reply
+            orientation: 'vertical'
+            spacing: dp(2)
+
+<BaudRatePopup>:
+    title: '波特率（AT+UART）'
+    title_font: app.font_name
+    title_size: sp(15)
+    title_color: 1, 1, 1, 1
+    separator_color: 1, 1, 1, 0.22
+    background_color: 0.06, 0.10, 0.08, 1
+    size_hint: 0.95, 0.72
+    BoxLayout:
+        orientation: 'vertical'
+        spacing: dp(8)
+        padding: dp(6)
+
+        Label:
+            text: '用 AT 指令实时修改模块串口波特率（立即生效、掉电保存）；每次连接 App 会自动锁成 9600'
+            font_name: app.font_name
+            font_size: sp(11)
+            color: 0.78, 0.90, 0.83, 1
+            halign: 'left'
+            valign: 'top'
+            text_size: self.size
+            size_hint_y: None
+            height: dp(34)
+
+        TextInput:
+            id: baud_input
+            text: root.value
+            font_name: app.font_name
+            font_size: sp(14)
+            multiline: False
+            input_filter: 'int'
+            size_hint_y: None
+            height: dp(44)
+            on_text: root.value = self.text
+
+        BoxLayout:
+            orientation: 'horizontal'
+            spacing: dp(8)
+            size_hint_y: None
+            height: dp(44)
+            RoundButton:
+                text: '9600'
+                font_size: sp(14)
+                on_release: root.choose(9600)
+            RoundButton:
+                text: '115200'
+                font_size: sp(14)
+                on_release: root.choose(115200)
+
+        BoxLayout:
+            orientation: 'horizontal'
+            spacing: dp(8)
+            size_hint_y: None
+            height: dp(44)
+            RoundButton:
+                text: '发送'
+                font_size: sp(14)
+                on_release: root.send()
+            RoundButton:
+                text: '关闭'
+                font_size: sp(14)
+                on_release: root.dismiss()
+
+        Label:
+            text: root.state
+            font_name: app.font_name
+            font_size: sp(11)
+            color: 0.86, 0.96, 0.90, 1
+            halign: 'left'
+            valign: 'top'
+            text_size: self.size
+            size_hint_y: None
+            height: dp(34)
+
+        BoxLayout:
+            id: baud_reply
             orientation: 'vertical'
             spacing: dp(2)
