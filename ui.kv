@@ -113,8 +113,8 @@
     background_color: 0, 0, 0, 0
     foreground_color: app.COLOR_TEXT
     cursor_color: app.COLOR_PRIMARY
-    # 未输入时的提示字：略深的灰，不能太浅（浅到看不清）
-    hint_text_color: 0.40, 0.45, 0.51, 1
+    # 未输入时的提示字：深灰，保证看得清（与聚焦时的深青边框区分开）
+    hint_text_color: 0.30, 0.32, 0.35, 1
     padding: dp(14), dp(14), dp(14), dp(14)
     canvas.before:
         Color:
@@ -124,9 +124,9 @@
             size: self.size
             radius: [dp(12)]
         Color:
-            rgba: app.COLOR_PRIMARY if self.focus else (0.72, 0.76, 0.81, 1)
+            rgba: app.COLOR_PRIMARY if self.focus else (0.38, 0.40, 0.43, 1)
         Line:
-            width: 1.2
+            width: 1.6 if self.focus else 1.4
             rounded_rectangle: self.x, self.y, self.width, self.height, dp(12)
 
 # 分区小标题
