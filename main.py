@@ -18,15 +18,17 @@ from kivy.app import App
 from kivy.animation import Animation
 from kivy.clock import Clock
 from kivy.core.text import LabelBase
-from kivy.core.window import Window
 from kivy.graphics import (Color, Ellipse, InstructionGroup, Line, Rectangle,
                            RoundedRectangle)
 from kivy.graphics.texture import Texture
 from kivy.lang import Builder
+from kivy.core.image import Image as CoreImage
+from kivy.core.window import Window
 from kivy.logger import Logger
 from kivy.metrics import dp, sp
 from kivy.properties import (BooleanProperty, ListProperty, NumericProperty,
                              ObjectProperty, StringProperty)
+from kivy.resources import resource_add_path, resource_find
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
@@ -224,6 +226,30 @@ def register_mono_font():
             except Exception:
                 Logger.exception('BleAssistant: 等宽字体注册失败 %s', path)
     return 'CJK'
+
+
+def load_badge():
+    """加载徽章图片，直接返回纹理。
+
+    安卓上 Image(source=绝对路径) 偶发加载不到（控制页那块就是空白），
+    于是改成启动时自己解码一次，KV 里直接绑 texture，绕开路径解析。
+    """
+    candidates = [BADGE_FILE, os.path.join(os.getcwd(), 'assets', 'badge.png')]
+    found = resource_find('assets/badge.png')
+    if found:
+        candidates.append(found)
+    for path in candidates:
+        if not path or not os.path.exists(path):
+            continue
+        try:
+            texture = CoreImage(path).texture
+            Logger.info('BleAssistant: 徽章已加载 %s (%dx%d)',
+                        path, texture.width, texture.height)
+            return path, texture
+        except Exception:                                       # noqa: BLE001
+            Logger.exception('BleAssistant: 徽章加载失败 %s', path)
+    Logger.warning('BleAssistant: 未找到 assets/badge.png，控制页不显示徽章')
+    return '', None
 
 
 class PatientStore(object):
@@ -586,12 +612,51 @@ class PopupRow(Label):
 
 
 class RootTabs(BoxLayout):
-    """根容器：上面是页面，下面是常驻的底部导航栏。"""
+    """根容器：状态条 + 页面 + 底部导航。
+
+    底部导航只保留**一套**按钮：普通模式是「控制/记录/登录」，
+    开发者模式重建为「服务/特征 · 波特率 · 自定义包」。
+    不能用两套导航靠 height:0 隐藏 —— Kivy 2.3 里隐藏的禁用按钮仍占着
+    原来的位置并会把触摸吃掉，表现为"下面的按钮点不动"。
+    """
 
     def on_kv_post(self, _base_widget):
-        # 子页面都挂好之后再定位到「登录」模块
-        # （不能在 KV 里写 current:，那时页面还没加进去）
+        self._nav_buttons = {}
+        self._nav_mode = None
+        self.rebuild_nav()
         self.ids.sm.current = 'mine'
+
+    def rebuild_nav(self):
+        app = App.get_running_app()
+        mode = 'dev' if app.dev_mode else 'normal'
+        if mode == self._nav_mode:
+            return
+        self._nav_mode = mode
+        bar = self.ids.nav_bar
+        bar.clear_widgets()
+        self._nav_buttons = {}
+
+        if mode == 'dev':
+            for text, callback in (('服务/特征', app.open_services),
+                                   ('波特率', app.open_baudrate),
+                                   ('自定义包', app.open_command)):
+                button = SquareButton(text=text, filled=False)
+                button.font_size = sp(13)
+                button.bind(on_release=lambda widget, cb=callback: cb())
+                bar.add_widget(button)
+            return
+
+        for text, name in (('控 制', 'ctrl'), ('记 录', 'logs'), ('登 录', 'mine')):
+            button = TabButton(text=text)
+            button.active = (app.active_tab == name)
+            button.bind(on_release=lambda widget, n=name: self.switch_tab(n))
+            self._nav_buttons[name] = button
+            bar.add_widget(button)
+
+    def sync_nav(self):
+        app = App.get_running_app()
+        for name, button in list(self._nav_buttons.items()):
+            button.active = (app.active_tab == name)
 
     def switch_tab(self, name):
         app = App.get_running_app()
@@ -1857,6 +1922,7 @@ class BleAssistantApp(App):
     teal_gradient = ObjectProperty(None, allownone=True)
     # 设备徽章图片（eg.png 里显示屏右侧那张，直接打包进来显示）
     badge_source = StringProperty('')
+    badge_texture = ObjectProperty(None, allownone=True)
     # 开发者自定义包弹窗（回传要转发给它）
     cmd_popup = ObjectProperty(None, allownone=True)
 
@@ -1866,7 +1932,10 @@ class BleAssistantApp(App):
         self.ble = create_ble_manager()
         self.navy_gradient = gradient_texture(GRAD_NAVY_A, GRAD_NAVY_B)
         self.teal_gradient = gradient_texture(GRAD_TEAL_A, GRAD_TEAL_B)
-        self.badge_source = BADGE_FILE if os.path.exists(BADGE_FILE) else ''
+        self.badge_source = ''
+        self.badge_texture = None
+        resource_add_path(APP_DIR)
+        self.badge_source, self.badge_texture = load_badge()
         self.store = AccountStore(os.path.join(self.user_data_dir, 'accounts.db'))
         self.patients = PatientStore(
             os.path.join(self.user_data_dir, 'patient.json'))
@@ -1898,8 +1967,15 @@ class BleAssistantApp(App):
         Window.bind(on_keyboard=self._on_keyboard)
         Builder.load_file(KV_FILE)
         root = RootTabs()
+        self.bind(active_tab=self._on_active_tab)
         Clock.schedule_once(self._start_poll, 0.5)
         return root
+
+    def _on_active_tab(self, _app, _value):
+        try:
+            self.root.sync_nav()
+        except Exception:                                       # noqa: BLE001
+            pass
 
     # ------------------------------------------------------------------
     # 通用
@@ -1943,6 +2019,7 @@ class BleAssistantApp(App):
         self.log_line('登录成功：%s' % username)
         self.log_line('点「蓝牙连接」选择设备，连接成功后即可下发命令')
         self.active_tab = 'ctrl'
+        self.root.rebuild_nav()
         self.root.ids.sm.current = 'ctrl'
 
     def logout(self):
@@ -1961,6 +2038,7 @@ class BleAssistantApp(App):
         self.bar_mode = 'patient'
         self.clear_display()
         self.active_tab = 'mine'
+        self.root.rebuild_nav()
         self.root.ids.sm.current = 'mine'
         try:
             self.screen('loginform').reset()
@@ -2106,11 +2184,13 @@ class BleAssistantApp(App):
             return
         self.dev_mode = True
         self.log_line('已进入开发者模式')
+        self.root.rebuild_nav()
         self.root.ids.sm.current = 'dev'
 
     def exit_dev_mode(self):
         self.dev_mode = False
         self.active_tab = 'ctrl'
+        self.root.rebuild_nav()
         self.root.ids.sm.current = 'ctrl'
 
     # ------------------------------------------------------------------

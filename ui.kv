@@ -113,7 +113,8 @@
     background_color: 0, 0, 0, 0
     foreground_color: app.COLOR_TEXT
     cursor_color: app.COLOR_PRIMARY
-    hint_text_color: 0.60, 0.66, 0.71, 1
+    # 未输入时的提示字：略深的灰，不能太浅（浅到看不清）
+    hint_text_color: 0.40, 0.45, 0.51, 1
     padding: dp(14), dp(14), dp(14), dp(14)
     canvas.before:
         Color:
@@ -123,7 +124,7 @@
             size: self.size
             radius: [dp(12)]
         Color:
-            rgba: app.COLOR_PRIMARY if self.focus else app.COLOR_LINE
+            rgba: app.COLOR_PRIMARY if self.focus else (0.72, 0.76, 0.81, 1)
         Line:
             width: 1.2
             rounded_rectangle: self.x, self.y, self.width, self.height, dp(12)
@@ -336,13 +337,12 @@
         RegisterScreen:
             name: 'register'
     BoxLayout:
-        id: nav_normal
+        id: nav_bar
         orientation: 'horizontal'
         size_hint_y: None
-        height: dp(72) if not app.dev_mode else 0
-        opacity: 0 if app.dev_mode else 1
-        disabled: app.dev_mode
-        padding: dp(10), dp(6), dp(10), dp(8)
+        # 留出底部安全区（手机手势条会吃掉最下面约 24dp 的触摸）
+        height: dp(86)
+        padding: dp(10), dp(8), dp(10), dp(24)
         spacing: dp(8)
         canvas.before:
             Color:
@@ -355,53 +355,6 @@
             Line:
                 width: 1
                 points: self.x, self.top, self.right, self.top
-        TabButton:
-            text: '控 制'
-            active: app.active_tab == 'ctrl'
-            on_release: root.switch_tab('ctrl')
-        TabButton:
-            text: '记 录'
-            active: app.active_tab == 'logs'
-            on_release: root.switch_tab('logs')
-        TabButton:
-            text: '登 录'
-            active: app.active_tab == 'mine'
-            on_release: root.switch_tab('mine')
-    BoxLayout:
-        id: nav_dev
-        orientation: 'horizontal'
-        size_hint_y: None
-        height: dp(72) if app.dev_mode else 0
-        opacity: 0 if not app.dev_mode else 1
-        disabled: not app.dev_mode
-        padding: dp(10), dp(6), dp(10), dp(8)
-        spacing: dp(8)
-        canvas.before:
-            Color:
-                rgba: 1, 1, 1, 1
-            Rectangle:
-                pos: self.pos
-                size: self.size
-            Color:
-                rgba: app.COLOR_LINE
-            Line:
-                width: 1
-                points: self.x, self.top, self.right, self.top
-        SquareButton:
-            text: '服务/特征'
-            font_size: sp(13)
-            filled: False
-            on_release: app.open_services()
-        SquareButton:
-            text: '波特率'
-            font_size: sp(13)
-            filled: False
-            on_release: app.open_baudrate()
-        SquareButton:
-            text: '自定义包'
-            font_size: sp(13)
-            filled: False
-            on_release: app.open_command()
 
 # ======================================================================
 # 开发者显示屏（沿用已验证的滚动显示屏）
@@ -657,24 +610,43 @@
                     BoxLayout:
                         orientation: 'vertical'
                         size_hint_x: None
-                        width: dp(94)
+                        width: dp(102)
                         spacing: dp(4)
-                        Image:
-                            source: app.badge_source
-                            size_hint_y: 1
-                            allow_stretch: True
-                            keep_ratio: True
+                        Widget:
+                        # 徽章：白色瓷片 + 蓝色描边，图片直接绑纹理（不靠路径加载）
+                        BoxLayout:
+                            size_hint: None, None
+                            size: dp(92), dp(92)
+                            pos_hint: {'center_x': 0.5}
+                            padding: dp(4)
+                            canvas.before:
+                                Color:
+                                    rgba: 1, 1, 1, 1
+                                RoundedRectangle:
+                                    pos: self.pos
+                                    size: self.size
+                                    radius: [dp(16)]
+                                Color:
+                                    rgba: 0.18, 0.50, 0.93, 0.40
+                                Line:
+                                    width: 1.4
+                                    rounded_rectangle: self.x, self.y, self.width, self.height, dp(16)
+                            Image:
+                                id: badge_image
+                                texture: app.badge_texture
+                                fit_mode: 'contain'
                         Label:
-                            text: '合安智护'
+                            text: '合安智护\n医疗设备蓝牙控制平台'
                             font_name: app.font_name
-                            font_size: sp(12)
+                            font_size: sp(9)
                             bold: True
                             color: app.COLOR_PRIMARY
                             halign: 'center'
                             valign: 'middle'
                             text_size: self.size
                             size_hint_y: None
-                            height: dp(22)
+                            height: dp(30)
+                        Widget:
 
                 # ---------------- 蓝牙 / 患者 / 开发者 ----------------
                 BoxLayout:
@@ -1000,6 +972,10 @@
 
             LongButton:
                 text: '版本信息'
+                opacity: 1 if app.logged_in else 0
+                disabled: not app.logged_in
+                size_hint_y: None
+                height: dp(56) if app.logged_in else 0
                 on_release: root.open_version()
 
             LongButton:

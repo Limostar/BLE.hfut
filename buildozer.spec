@@ -1,7 +1,7 @@
 [app]
 
 # 应用名称（手机桌面显示的名字）
-title = 绿联蓝牙助手
+title = 合安智护
 
 # 包名：com.med.bleassistant
 package.name = bleassistant
