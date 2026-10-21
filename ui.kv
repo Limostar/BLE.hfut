@@ -1,27 +1,65 @@
 #:import SlideTransition kivy.uix.screenmanager.SlideTransition
 
 # ======================================================================
-# 通用控件
+# 通用控件 —— 医疗科技风：浅灰蓝底、白色卡片、深青主色、方形圆角
 # ======================================================================
 
-<RoundButton@Button>:
-    font_name: app.font_name
-    font_size: sp(15)
+<Card@BoxLayout>:
+    orientation: 'vertical'
+    padding: dp(14)
+    spacing: dp(8)
     size_hint_y: None
-    height: dp(46)
-    background_normal: ''
-    background_down: ''
-    background_color: 0, 0, 0, 0
-    color: (0.42, 0.47, 0.44, 1) if self.disabled else (1, 1, 1, 1)
+    height: self.minimum_height
     canvas.before:
         Color:
-            rgba: app.COLOR_DISABLED if self.disabled else (app.COLOR_PRIMARY_DARK if self.state == 'down' else app.COLOR_PRIMARY)
+            rgba: 0.18, 0.50, 0.93, 0.10
+        RoundedRectangle:
+            pos: self.x, self.y - dp(3)
+            size: self.width, self.height + dp(3)
+            radius: [dp(20)]
+        Color:
+            rgba: app.COLOR_CARD
         RoundedRectangle:
             pos: self.pos
             size: self.size
-            radius: [dp(12)]
+            radius: [dp(18)]
+        Color:
+            rgba: 0.18, 0.50, 0.93, 0.30
+        Line:
+            width: 1.2
+            rounded_rectangle: self.x, self.y, self.width, self.height, dp(18)
 
-# 「登录」页那种长条按钮（仿微信"我的"）
+# 方形圆角按钮：filled=True 实心，filled=False 白底描边
+<SquareButton>:
+    font_name: app.font_name
+    font_size: sp(15)
+    bold: True
+    size_hint_y: None
+    height: dp(52)
+    background_normal: ''
+    background_down: ''
+    background_color: 0, 0, 0, 0
+    color: (1, 1, 1, 1) if self.filled else (app.COLOR_DISABLED if self.disabled else self.accent)
+    canvas.before:
+        Color:
+            rgba: app.COLOR_DISABLED if self.disabled else (self.accent if self.filled else (1, 1, 1, 1))
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(16)]
+        Color:
+            rgba: (0, 0, 0, 0) if self.filled else (app.COLOR_DISABLED if self.disabled else self.accent)
+        Line:
+            width: 1.2
+            rounded_rectangle: self.x, self.y, self.width, self.height, dp(16)
+
+# 底部导航（选中实心、未选中白底描边，直接用 SquareButton 的样式）
+<TabButton>:
+    font_size: sp(14)
+    filled: self.active
+    accent: app.COLOR_PRIMARY
+
+# 「登录」页那种长条按钮
 <LongButton@Button>:
     font_name: app.font_name
     font_size: sp(16)
@@ -37,22 +75,22 @@
     padding: dp(22), 0
     canvas.before:
         Color:
-            rgba: (0.905, 0.968, 0.925, 1) if self.state == 'down' else (1, 1, 1, 1)
+            rgba: (0.94, 0.97, 0.98, 1) if self.state == 'down' else (1, 1, 1, 1)
         RoundedRectangle:
             pos: self.pos
             size: self.size
-            radius: [dp(14)]
+            radius: [dp(16)]
         Color:
             rgba: app.COLOR_DISABLED if self.disabled else app.COLOR_PRIMARY
         RoundedRectangle:
-            pos: self.x + dp(8), self.center_y - dp(11)
-            size: dp(4), dp(22)
+            pos: self.x + dp(10), self.center_y - dp(10)
+            size: dp(4), dp(20)
             radius: [dp(2)]
         Color:
             rgba: app.COLOR_LINE
         Line:
             width: 1
-            rounded_rectangle: self.x, self.y, self.width, self.height, dp(14)
+            rounded_rectangle: self.x, self.y, self.width, self.height, dp(16)
 
 <TextLink@Button>:
     font_name: app.font_name
@@ -62,7 +100,7 @@
     background_normal: ''
     background_down: ''
     background_color: 0, 0, 0, 0
-    color: app.COLOR_PRIMARY_DARK
+    color: app.COLOR_PRIMARY
 
 <FieldInput@TextInput>:
     font_name: app.font_name
@@ -75,7 +113,7 @@
     background_color: 0, 0, 0, 0
     foreground_color: app.COLOR_TEXT
     cursor_color: app.COLOR_PRIMARY
-    hint_text_color: 0.55, 0.64, 0.58, 1
+    hint_text_color: 0.60, 0.66, 0.71, 1
     padding: dp(14), dp(14), dp(14), dp(14)
     canvas.before:
         Color:
@@ -90,49 +128,30 @@
             width: 1.2
             rounded_rectangle: self.x, self.y, self.width, self.height, dp(12)
 
-<Card@BoxLayout>:
-    orientation: 'vertical'
-    padding: dp(16)
-    spacing: dp(10)
-    size_hint_y: None
-    height: self.minimum_height
-    canvas.before:
-        Color:
-            rgba: app.COLOR_CARD
-        RoundedRectangle:
-            pos: self.pos
-            size: self.size
-            radius: [dp(16)]
-        Color:
-            rgba: app.COLOR_LINE
-        Line:
-            width: 1
-            rounded_rectangle: self.x, self.y, self.width, self.height, dp(16)
-
 # 分区小标题
 <SectionTitle@Label>:
     font_name: app.font_name
-    font_size: sp(14)
+    font_size: sp(16)
     bold: True
-    color: app.COLOR_PRIMARY_DARK
+    color: app.COLOR_TEXT
     halign: 'left'
     valign: 'middle'
     text_size: self.size
     size_hint_y: None
-    height: dp(26)
+    height: dp(28)
 
 # 分区说明小字
 <SectionNote@Label>:
     font_name: app.font_name
-    font_size: sp(11)
+    font_size: sp(12)
     color: app.COLOR_TEXT_WEAK
     halign: 'left'
     valign: 'top'
     text_size: self.size
     size_hint_y: None
-    height: dp(18)
+    height: dp(20)
 
-# 弹窗正文一律白字：弹窗是黑底，深墨绿字在手机上几乎看不见
+# ---- 弹窗正文行（弹窗是深色底，白字）----
 <ServiceRow>:
     font_name: app.font_name
     font_size: sp(11)
@@ -145,26 +164,14 @@
 
 <PopupRow>:
     font_name: app.font_name
-    font_size: sp(11)
+    font_size: sp(12)
     color: 1, 1, 1, 0.96
     halign: 'left'
     valign: 'top'
     text_size: self.size
     size_hint_y: None
-    height: dp(40)
+    height: dp(34)
 
-<LogEntryRow>:
-    font_name: app.font_name
-    font_size: sp(11)
-    color: 1, 1, 1, 0.96
-    halign: 'left'
-    valign: 'top'
-    text_size: self.size
-    size_hint_y: None
-    height: dp(30)
-
-# 主界面/服务页上固定显示的检验行：一行一个固定高度标签，
-# 与状态卡绿字同一套写法（该写法已在手机上验证可正常显示）
 <DiagLine@Label>:
     font_name: app.font_name
     font_size: sp(10)
@@ -175,7 +182,7 @@
     size_hint_y: None
     height: dp(18)
 
-# 显示屏里的一行：白字、固定行高（可见区大约正好放 10 行）
+# 显示屏里的一行：白字、固定行高
 <ScreenLine>:
     font_name: app.font_name
     font_size: sp(11)
@@ -198,7 +205,7 @@
     color: app.COLOR_TEXT
     canvas.before:
         Color:
-            rgba: (0.898, 0.973, 0.918, 1) if self.state == 'down' else (1, 1, 1, 1)
+            rgba: (0.94, 0.97, 0.98, 1) if self.state == 'down' else (1, 1, 1, 1)
         RoundedRectangle:
             pos: self.pos
             size: self.size
@@ -209,56 +216,26 @@
             width: 1
             rounded_rectangle: self.x, self.y, self.width, self.height, dp(10)
 
-# 圆形渐变按钮（蓝牙连接 / 功能键 / 日志格子共用）
-<CircleButton>:
-    circle: True
-    radius: 0
-    Label:
-        text: root.text
-        font_name: app.font_name
-        font_size: root.font_size_hint
-        bold: True
-        color: 1, 1, 1, 1 if not root.disabled else 0.75
-        halign: 'center'
-        valign: 'middle'
-        text_size: self.size
-
-# 底部导航按钮
-<TabButton>:
-    radius: dp(16)
-    circle: False
-    color_a: app.GRAD_TAB_A if self.active else (0.929, 0.957, 0.941, 1)
-    color_b: app.GRAD_TAB_B if self.active else (0.929, 0.957, 0.941, 1)
-    Label:
-        text: root.text
-        font_name: app.font_name
-        font_size: sp(14)
-        bold: True
-        color: (1, 1, 1, 1) if root.active else (0.38, 0.46, 0.41, 1)
-        halign: 'center'
-        valign: 'middle'
-        text_size: self.size
-
-# 未登录时盖在模块上的半透明灰色遮罩
+# 未登录时盖在模块上的遮罩
 <GateOverlay>:
     canvas.before:
         Color:
-            rgba: 0.35, 0.39, 0.37, 0.62
+            rgba: 0.965, 0.973, 0.980, 0.80
         Rectangle:
             pos: self.pos
             size: self.size
     BoxLayout:
         orientation: 'vertical'
         size_hint: None, None
-        width: dp(220)
-        height: dp(76)
+        width: dp(240)
+        height: dp(84)
         pos_hint: {'center_x': 0.5, 'center_y': 0.5}
         Label:
             text: '登录后即可使用'
             font_name: app.font_name
             font_size: sp(18)
             bold: True
-            color: 1, 1, 1, 0.96
+            color: app.COLOR_PRIMARY
             halign: 'center'
             valign: 'middle'
             text_size: self.size
@@ -267,25 +244,89 @@
         Label:
             text: '请到「登录」模块完成用户登录'
             font_name: app.font_name
-            font_size: sp(12)
-            color: 0.92, 0.96, 0.94, 0.92
+            font_size: sp(13)
+            color: app.COLOR_TEXT_WEAK
             halign: 'center'
             valign: 'middle'
             text_size: self.size
             size_hint_y: None
-            height: dp(24)
+            height: dp(26)
 
 # ======================================================================
-# 根容器：页面 + 常驻底部导航
+# 顶部全局状态条（固定，不随内容滚动）
 # ======================================================================
+<StatusBar>:
+    orientation: 'horizontal'
+    size_hint_y: None
+    height: dp(68)
+    padding: dp(16), dp(8)
+    spacing: dp(10)
+    canvas.before:
+        Color:
+            rgba: app.COLOR_DANGER if app.bar_mode == 'alarm' else app.COLOR_CARD
+        Rectangle:
+            pos: self.pos
+            size: self.size
+        Color:
+            rgba: (1, 1, 1, 0.30) if app.bar_mode == 'alarm' else app.COLOR_LINE
+        Line:
+            width: 1
+            points: self.x, self.y, self.right, self.y
+    BoxLayout:
+        orientation: 'vertical'
+        spacing: dp(0)
+        Label:
+            text: '告警' if app.bar_mode == 'alarm' else ('记录' if app.bar_mode == 'notice' else '患者身份')
+            font_name: app.font_name
+            font_size: sp(12)
+            color: (1, 1, 1, 0.85) if app.bar_mode != 'patient' else app.COLOR_TEXT_WEAK
+            halign: 'left'
+            valign: 'bottom'
+            text_size: self.size
+            size_hint_y: None
+            height: dp(20)
+        Label:
+            text: (app.bar_message if app.bar_mode != 'patient' else app.patient_label)
+            font_name: app.font_name
+            font_size: sp(20)
+            bold: True
+            color: (1, 1, 1, 1) if app.bar_mode != 'patient' else app.COLOR_TEXT
+            halign: 'left'
+            valign: 'top'
+            text_size: self.size
+            size_hint_y: None
+            height: dp(32)
+            opacity: app.bar_opacity
+    Label:
+        text: '已连接' if app.connected else '未连接'
+        font_name: app.font_name
+        font_size: sp(12)
+        bold: True
+        color: (1, 1, 1, 1) if app.bar_mode == 'alarm' else (app.COLOR_OK if app.connected else app.COLOR_TEXT_WEAK)
+        size_hint: None, None
+        size: dp(72), dp(30)
+        pos_hint: {'center_y': 0.5}
+        canvas.before:
+            Color:
+                rgba: (1, 1, 1, 0.20) if app.bar_mode == 'alarm' else ((0.07, 0.72, 0.42, 0.14) if app.connected else (0.596, 0.635, 0.702, 0.14))
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(9)]
 
+# ======================================================================
+# 根容器：状态条 + 页面 + 底部导航（开发者模式换一套）
+# ======================================================================
 <RootTabs>:
     orientation: 'vertical'
+    StatusBar:
     ScreenManager:
         id: sm
         transition: SlideTransition()
         CtrlScreen:
             name: 'ctrl'
+        DevScreen:
+            name: 'dev'
         LogsScreen:
             name: 'logs'
         MineScreen:
@@ -295,11 +336,14 @@
         RegisterScreen:
             name: 'register'
     BoxLayout:
+        id: nav_normal
         orientation: 'horizontal'
         size_hint_y: None
-        height: dp(64)
+        height: dp(72) if not app.dev_mode else 0
+        opacity: 0 if app.dev_mode else 1
+        disabled: app.dev_mode
         padding: dp(10), dp(6), dp(10), dp(8)
-        spacing: dp(10)
+        spacing: dp(8)
         canvas.before:
             Color:
                 rgba: 1, 1, 1, 1
@@ -323,11 +367,45 @@
             text: '登 录'
             active: app.active_tab == 'mine'
             on_release: root.switch_tab('mine')
+    BoxLayout:
+        id: nav_dev
+        orientation: 'horizontal'
+        size_hint_y: None
+        height: dp(72) if app.dev_mode else 0
+        opacity: 0 if not app.dev_mode else 1
+        disabled: not app.dev_mode
+        padding: dp(10), dp(6), dp(10), dp(8)
+        spacing: dp(8)
+        canvas.before:
+            Color:
+                rgba: 1, 1, 1, 1
+            Rectangle:
+                pos: self.pos
+                size: self.size
+            Color:
+                rgba: app.COLOR_LINE
+            Line:
+                width: 1
+                points: self.x, self.top, self.right, self.top
+        SquareButton:
+            text: '服务/特征'
+            font_size: sp(13)
+            filled: False
+            on_release: app.open_services()
+        SquareButton:
+            text: '波特率'
+            font_size: sp(13)
+            filled: False
+            on_release: app.open_baudrate()
+        SquareButton:
+            text: '自定义包'
+            font_size: sp(13)
+            filled: False
+            on_release: app.open_command()
 
 # ======================================================================
-# 「控制」
+# 开发者显示屏（沿用已验证的滚动显示屏）
 # ======================================================================
-
 <DisplayPanel>:
     orientation: 'vertical'
     canvas.before:
@@ -337,12 +415,12 @@
             texture: app.navy_gradient
             pos: self.pos
             size: self.size
-            radius: [dp(14)]
+            radius: [dp(16)]
         Color:
-            rgba: 0.40, 0.78, 0.98, 0.55
+            rgba: 0.18, 0.50, 0.93, 0.35
         Line:
             width: 1.2
-            rounded_rectangle: self.x, self.y, self.width, self.height, dp(14)
+            rounded_rectangle: self.x, self.y, self.width, self.height, dp(16)
     BoxLayout:
         orientation: 'vertical'
         padding: dp(10), dp(8), dp(8), dp(8)
@@ -352,7 +430,7 @@
             font_name: app.font_name
             font_size: sp(12)
             bold: True
-            color: 0.62, 0.89, 1, 1
+            color: 0.62, 0.89, 0.86, 1
             halign: 'left'
             valign: 'middle'
             text_size: self.size
@@ -370,8 +448,6 @@
                     cols: 1
                     spacing: dp(2)
                     size_hint_y: None
-                    # 至少撑满可视区：内容少时顶部对齐（否则 Kivy 会把它顶到底部，
-                    # 上方留一大片空白、整体还会往下偏）
                     height: max(self.minimum_height, self.parent.height)
         BoxLayout:
             orientation: 'horizontal'
@@ -382,7 +458,7 @@
                 text: app.status_text
                 font_name: app.font_name
                 font_size: sp(11)
-                color: 0.80, 0.94, 1, 1
+                color: 0.80, 0.94, 0.95, 1
                 halign: 'left'
                 valign: 'middle'
                 text_size: self.size
@@ -404,225 +480,444 @@
                         size: self.size
                         radius: [dp(8)]
                     Color:
-                        rgba: 0.62, 0.89, 1, 0.85
+                        rgba: 0.62, 0.89, 0.86, 0.85
                     Line:
                         width: 1
                         rounded_rectangle: self.x, self.y, self.width, self.height, dp(8)
-                # 注意：这里在 <DisplayPanel> 规则里，root 是显示屏而不是页面。
-                # 以前写成 root.clear_screen()，点下去直接 AttributeError 闪退。
-                on_release: app.screen('ctrl').clear_screen()
+                on_release: app.screen('dev').clear_screen()
 
+# ======================================================================
+# 「控制」——设备监测 + 9 个功能键 + 蓝牙 / 患者 / 开发者
+# ======================================================================
 <CtrlScreen>:
     FloatLayout:
-        BoxLayout:
-            orientation: 'vertical'
-            padding: dp(14), dp(8), dp(14), dp(6)
-            spacing: dp(8)
-            canvas.before:
-                Color:
-                    rgba: app.COLOR_BG
-                Rectangle:
-                    pos: self.pos
-                    size: self.size
-
-            DisplayPanel
-
+        canvas.before:
+            Color:
+                rgba: app.COLOR_BG
+            Rectangle:
+                pos: self.pos
+                size: self.size
+        ScrollView:
+            do_scroll_x: False
+            bar_width: dp(2)
             BoxLayout:
-                orientation: 'horizontal'
+                orientation: 'vertical'
+                padding: dp(12), dp(10)
                 spacing: dp(10)
                 size_hint_y: None
-                height: dp(72)
-                CircleButton:
-                    text: '蓝牙连接'
-                    font_size_hint: sp(12)
-                    color_a: app.GRAD_LINK_A
-                    color_b: app.GRAD_LINK_B
-                    border_color: 1, 1, 1, 0.8
-                    on_release: root.open_device_dialog()
-                CircleButton:
-                    text: '断开连接'
-                    font_size_hint: sp(12)
-                    color_a: app.GRAD_LINK_A
-                    color_b: app.GRAD_LINK_B
-                    border_color: 1, 1, 1, 0.8
-                    disabled: not app.connected
-                    on_release: root.do_disconnect()
-                CircleButton:
-                    text: '服务/特征'
-                    font_size_hint: sp(11)
-                    color_a: app.GRAD_LINK_A
-                    color_b: app.GRAD_LINK_B
-                    border_color: 1, 1, 1, 0.8
-                    disabled: not app.connected
-                    on_release: root.open_services_dialog()
+                height: self.minimum_height
 
-            GridLayout:
-                cols: 4
-                spacing: dp(8)
-                size_hint_y: None
-                height: dp(2 * 76 + 8)
-                CircleButton:
-                    text: '启动'
-                    font_size_hint: sp(13)
-                    color_a: app.GRAD_FUNC_A
-                    color_b: app.GRAD_FUNC_B
-                    disabled: not app.connected
-                    on_release: root.send_preset('启动')
-                CircleButton:
-                    text: '停止'
-                    font_size_hint: sp(13)
-                    color_a: app.GRAD_FUNC_A
-                    color_b: app.GRAD_FUNC_B
-                    disabled: not app.connected
-                    on_release: root.send_preset('停止')
-                CircleButton:
-                    text: '开发者'
-                    font_size_hint: sp(12)
-                    color_a: app.GRAD_FUNC_A
-                    color_b: app.GRAD_FUNC_B
-                    disabled: not app.connected
-                    on_release: root.open_developer()
-                CircleButton:
-                    text: '波特率'
-                    font_size_hint: sp(12)
-                    color_a: app.GRAD_FUNC_A
-                    color_b: app.GRAD_FUNC_B
-                    disabled: not app.connected
-                    on_release: root.open_baudrate()
-                CircleButton:
-                    text: '功能五'
-                    font_size_hint: sp(12)
-                    color_a: app.GRAD_FUNC_A
-                    color_b: app.GRAD_FUNC_B
-                    disabled: not app.connected
-                    on_release: root.reserved('功能五')
-                CircleButton:
-                    text: '功能六'
-                    font_size_hint: sp(12)
-                    color_a: app.GRAD_FUNC_A
-                    color_b: app.GRAD_FUNC_B
-                    disabled: not app.connected
-                    on_release: root.reserved('功能六')
-                CircleButton:
-                    text: '功能七'
-                    font_size_hint: sp(12)
-                    color_a: app.GRAD_FUNC_A
-                    color_b: app.GRAD_FUNC_B
-                    disabled: not app.connected
-                    on_release: root.reserved('功能七')
-                CircleButton:
-                    text: '功能八'
-                    font_size_hint: sp(12)
-                    color_a: app.GRAD_FUNC_A
-                    color_b: app.GRAD_FUNC_B
-                    disabled: not app.connected
-                    on_release: root.reserved('功能八')
+                # ---------------- 监测卡 ----------------
+                BoxLayout:
+                    orientation: 'horizontal'
+                    size_hint_y: None
+                    height: dp(208)
+                    padding: dp(14)
+                    spacing: dp(10)
+                    canvas.before:
+                        Color:
+                            rgba: 0.18, 0.50, 0.93, 0.10
+                        RoundedRectangle:
+                            pos: self.x, self.y - dp(3)
+                            size: self.width, self.height + dp(3)
+                            radius: [dp(20)]
+                        Color:
+                            rgba: app.COLOR_CARD
+                        RoundedRectangle:
+                            pos: self.pos
+                            size: self.size
+                            radius: [dp(18)]
+                        Color:
+                            rgba: 0.18, 0.50, 0.93, 0.30
+                        Line:
+                            width: 1.2
+                            rounded_rectangle: self.x, self.y, self.width, self.height, dp(18)
+
+                    BoxLayout:
+                        orientation: 'vertical'
+                        spacing: dp(4)
+                        Label:
+                            text: '设备监测'
+                            font_name: app.font_name
+                            font_size: sp(12)
+                            bold: True
+                            color: app.COLOR_TEXT_WEAK
+                            halign: 'left'
+                            valign: 'middle'
+                            text_size: self.size
+                            size_hint_y: None
+                            height: dp(20)
+                        GridLayout:
+                            cols: 3
+                            spacing: dp(4)
+                            size_hint_y: None
+                            height: dp(64)
+                            BoxLayout:
+                                orientation: 'vertical'
+                                Label:
+                                    text: app.battery_text
+                                    font_name: app.mono_font
+                                    font_size: sp(24)
+                                    bold: True
+                                    color: app.COLOR_PRIMARY
+                                    halign: 'center'
+                                    valign: 'middle'
+                                    text_size: self.size
+                                    size_hint_y: None
+                                    height: dp(38)
+                                Label:
+                                    text: '剩余电量'
+                                    font_name: app.font_name
+                                    font_size: sp(11)
+                                    color: app.COLOR_TEXT_WEAK
+                                    halign: 'center'
+                                    valign: 'top'
+                                    text_size: self.size
+                                    size_hint_y: None
+                                    height: dp(20)
+                            BoxLayout:
+                                orientation: 'vertical'
+                                Label:
+                                    text: app.pressure_text
+                                    font_name: app.mono_font
+                                    font_size: sp(24)
+                                    bold: True
+                                    color: app.COLOR_BLUE
+                                    halign: 'center'
+                                    valign: 'middle'
+                                    text_size: self.size
+                                    size_hint_y: None
+                                    height: dp(38)
+                                Label:
+                                    text: '压力'
+                                    font_name: app.font_name
+                                    font_size: sp(11)
+                                    color: app.COLOR_TEXT_WEAK
+                                    halign: 'center'
+                                    valign: 'top'
+                                    text_size: self.size
+                                    size_hint_y: None
+                                    height: dp(20)
+                            BoxLayout:
+                                orientation: 'vertical'
+                                Label:
+                                    text: app.temp_text
+                                    font_name: app.mono_font
+                                    font_size: sp(24)
+                                    bold: True
+                                    color: app.COLOR_WARN_HIGH
+                                    halign: 'center'
+                                    valign: 'middle'
+                                    text_size: self.size
+                                    size_hint_y: None
+                                    height: dp(38)
+                                Label:
+                                    text: '温度'
+                                    font_name: app.font_name
+                                    font_size: sp(11)
+                                    color: app.COLOR_TEXT_WEAK
+                                    halign: 'center'
+                                    valign: 'top'
+                                    text_size: self.size
+                                    size_hint_y: None
+                                    height: dp(20)
+                        Label:
+                            text: '蓝牙状态：%s' % app.ble_state_text
+                            font_name: app.font_name
+                            font_size: sp(13)
+                            color: app.COLOR_TEXT
+                            halign: 'left'
+                            valign: 'middle'
+                            text_size: self.size
+                            size_hint_y: None
+                            height: dp(24)
+                        Label:
+                            text: '设备状态：%s' % app.device_state_text
+                            font_name: app.font_name
+                            font_size: sp(13)
+                            color: app.COLOR_TEXT
+                            halign: 'left'
+                            valign: 'middle'
+                            text_size: self.size
+                            size_hint_y: None
+                            height: dp(24)
+                        Label:
+                            text: app.countdown_text
+                            font_name: app.mono_font
+                            font_size: sp(13)
+                            bold: True
+                            color: app.COLOR_BLUE
+                            halign: 'left'
+                            valign: 'middle'
+                            text_size: self.size
+                            size_hint_y: None
+                            height: dp(24)
+                            opacity: 1 if app.countdown_text else 0
+
+                    BoxLayout:
+                        orientation: 'vertical'
+                        size_hint_x: None
+                        width: dp(94)
+                        spacing: dp(4)
+                        Image:
+                            source: app.badge_source
+                            size_hint_y: 1
+                            allow_stretch: True
+                            keep_ratio: True
+                        Label:
+                            text: '合安智护'
+                            font_name: app.font_name
+                            font_size: sp(12)
+                            bold: True
+                            color: app.COLOR_PRIMARY
+                            halign: 'center'
+                            valign: 'middle'
+                            text_size: self.size
+                            size_hint_y: None
+                            height: dp(22)
+
+                # ---------------- 蓝牙 / 患者 / 开发者 ----------------
+                BoxLayout:
+                    orientation: 'horizontal'
+                    spacing: dp(8)
+                    size_hint_y: None
+                    height: dp(54)
+                    SquareButton:
+                        text: '蓝牙连接'
+                        font_size: sp(13)
+                        on_release: root.open_device_dialog()
+                    SquareButton:
+                        text: '断开连接'
+                        font_size: sp(13)
+                        filled: False
+                        disabled: not app.connected
+                        on_release: root.do_disconnect()
+                    SquareButton:
+                        text: '患者信息'
+                        font_size: sp(13)
+                        filled: False
+                        accent: app.COLOR_BLUE
+                        disabled: not app.connected
+                        on_release: root.open_patient()
+                    SquareButton:
+                        text: '开发者'
+                        font_size: sp(13)
+                        filled: False
+                        accent: app.COLOR_TEXT_WEAK
+                        on_release: root.open_developer()
+
+                # ---------------- 功能键 3 列 × 4 行 ----------------
+                GridLayout:
+                    cols: 3
+                    spacing: dp(8)
+                    size_hint_y: None
+                    height: dp(4 * 52 + 3 * 8)
+                    SquareButton:
+                        text: '充气'
+                        font_size: sp(15)
+                        filled: False
+                        disabled: not app.connected
+                        on_release: root.press_function('充气')
+                    SquareButton:
+                        text: '渐进充气'
+                        font_size: sp(15)
+                        filled: False
+                        disabled: not app.connected
+                        on_release: root.press_function('渐进充气')
+                    SquareButton:
+                        text: '停止充气'
+                        font_size: sp(15)
+                        filled: False
+                        accent: app.COLOR_WARN_HIGH
+                        disabled: not app.connected
+                        on_release: root.press_function('停止充气')
+                    SquareButton:
+                        text: '放气'
+                        font_size: sp(15)
+                        filled: False
+                        disabled: not app.connected
+                        on_release: root.press_function('放气')
+                    SquareButton:
+                        text: '渐进放气'
+                        font_size: sp(15)
+                        filled: False
+                        disabled: not app.connected
+                        on_release: root.press_function('渐进放气')
+                    SquareButton:
+                        text: '停止放气'
+                        font_size: sp(15)
+                        filled: False
+                        accent: app.COLOR_WARN_HIGH
+                        disabled: not app.connected
+                        on_release: root.press_function('停止放气')
+                    SquareButton:
+                        text: '急停'
+                        font_size: sp(16)
+                        filled: True
+                        accent: app.COLOR_DANGER
+                        disabled: not app.connected
+                        on_release: root.press_function('急停')
+                    SquareButton:
+                        text: '复位'
+                        font_size: sp(15)
+                        filled: False
+                        accent: app.COLOR_WARN_HIGH
+                        disabled: not app.connected
+                        on_release: root.press_function('复位')
+                    SquareButton:
+                        text: '刷新监测'
+                        font_size: sp(15)
+                        filled: False
+                        accent: app.COLOR_BLUE
+                        disabled: not app.connected
+                        on_release: root.press_function('刷新监测')
+                    SquareButton:
+                        text: '附加功能1'
+                        font_size: sp(13)
+                        filled: False
+                        accent: app.COLOR_DISABLED
+                        disabled: True
+                    SquareButton:
+                        text: '附加功能2'
+                        font_size: sp(13)
+                        filled: False
+                        accent: app.COLOR_DISABLED
+                        disabled: True
+                    SquareButton:
+                        text: '附加功能3'
+                        font_size: sp(13)
+                        filled: False
+                        accent: app.COLOR_DISABLED
+                        disabled: True
 
         GateOverlay:
             opacity: 1 if not app.logged_in else 0
 
 # ======================================================================
-# 「记录」
+# 「开发者模式」
 # ======================================================================
-
-<LogsScreen>:
+<DevScreen>:
     FloatLayout:
+        canvas.before:
+            Color:
+                rgba: app.COLOR_BG
+            Rectangle:
+                pos: self.pos
+                size: self.size
         BoxLayout:
             orientation: 'vertical'
-            padding: dp(16), dp(10)
-            spacing: dp(8)
-            canvas.before:
-                Color:
-                    rgba: app.COLOR_BG
-                Rectangle:
-                    pos: self.pos
-                    size: self.size
-
-            SectionTitle:
-                text: '蓝牙日志'
-            SectionNote:
-                text: '每次退出登录，都会把本次登录期间显示屏里的内容存下来（最多 5 次）'
-            GridLayout:
-                cols: 5
+            padding: dp(12), dp(10)
+            spacing: dp(10)
+            DisplayPanel:
+                size_hint_y: 1
+            BoxLayout:
+                orientation: 'horizontal'
                 spacing: dp(8)
                 size_hint_y: None
-                height: dp(72)
-                CircleButton:
-                    text: '1'
-                    font_size_hint: sp(18)
-                    color_a: app.GRAD_LOG_A
-                    color_b: app.GRAD_LOG_B
-                    on_release: root.open_session(0)
-                CircleButton:
-                    text: '2'
-                    font_size_hint: sp(18)
-                    color_a: app.GRAD_LOG_A
-                    color_b: app.GRAD_LOG_B
-                    on_release: root.open_session(1)
-                CircleButton:
-                    text: '3'
-                    font_size_hint: sp(18)
-                    color_a: app.GRAD_LOG_A
-                    color_b: app.GRAD_LOG_B
-                    on_release: root.open_session(2)
-                CircleButton:
-                    text: '4'
-                    font_size_hint: sp(18)
-                    color_a: app.GRAD_LOG_A
-                    color_b: app.GRAD_LOG_B
-                    on_release: root.open_session(3)
-                CircleButton:
-                    text: '5'
-                    font_size_hint: sp(18)
-                    color_a: app.GRAD_LOG_A
-                    color_b: app.GRAD_LOG_B
-                    on_release: root.open_session(4)
+                height: dp(54)
+                SquareButton:
+                    text: '蓝牙连接'
+                    font_size: sp(13)
+                    on_release: root.open_device_dialog()
+                SquareButton:
+                    text: '断开连接'
+                    font_size: sp(13)
+                    filled: False
+                    disabled: not app.connected
+                    on_release: root.do_disconnect()
+                SquareButton:
+                    text: '信息复原'
+                    font_size: sp(13)
+                    filled: False
+                    accent: app.COLOR_WARN_HIGH
+                    on_release: root.restore_info()
+            SquareButton:
+                text: '退出开发者模式'
+                font_size: sp(14)
+                filled: False
+                accent: app.COLOR_TEXT_WEAK
+                height: dp(48)
+                on_release: root.exit_dev()
 
-            Widget:
-                size_hint_y: 0.08
-
-            SectionTitle:
-                text: '诊断记录'
-            SectionNote:
-                text: '该功能暂时预留'
-            GridLayout:
-                cols: 5
-                spacing: dp(8)
+# ======================================================================
+# 「记录」——待办任务 / 已完成折叠 / 交接班摘要
+# ======================================================================
+<LogsScreen>:
+    FloatLayout:
+        canvas.before:
+            Color:
+                rgba: app.COLOR_BG
+            Rectangle:
+                pos: self.pos
+                size: self.size
+        ScrollView:
+            do_scroll_x: False
+            bar_width: dp(2)
+            BoxLayout:
+                orientation: 'vertical'
+                padding: dp(12), dp(10)
+                spacing: dp(10)
                 size_hint_y: None
-                height: dp(72)
-                CircleButton:
-                    text: '1'
-                    font_size_hint: sp(18)
-                    color_a: app.GRAD_LOG_A
-                    color_b: app.GRAD_LOG_B
-                    on_release: root.open_diag(0)
-                CircleButton:
-                    text: '2'
-                    font_size_hint: sp(18)
-                    color_a: app.GRAD_LOG_A
-                    color_b: app.GRAD_LOG_B
-                    on_release: root.open_diag(1)
-                CircleButton:
-                    text: '3'
-                    font_size_hint: sp(18)
-                    color_a: app.GRAD_LOG_A
-                    color_b: app.GRAD_LOG_B
-                    on_release: root.open_diag(2)
-                CircleButton:
-                    text: '4'
-                    font_size_hint: sp(18)
-                    color_a: app.GRAD_LOG_A
-                    color_b: app.GRAD_LOG_B
-                    on_release: root.open_diag(3)
-                CircleButton:
-                    text: '5'
-                    font_size_hint: sp(18)
-                    color_a: app.GRAD_LOG_A
-                    color_b: app.GRAD_LOG_B
-                    on_release: root.open_diag(4)
+                height: self.minimum_height
 
-            Widget:
-                size_hint_y: 0.1
+                Card:
+                    SectionTitle:
+                        text: '待办任务'
+                    SectionNote:
+                        text: '勾选即标记完成；批量确认会再问一次'
+                    BoxLayout:
+                        id: task_list
+                        orientation: 'vertical'
+                        spacing: dp(8)
+                        size_hint_y: None
+                        height: self.minimum_height
+                    SquareButton:
+                        text: '批量确认'
+                        font_size: sp(14)
+                        height: dp(48)
+                        on_release: root.confirm_all()
+
+                Card:
+                    Button:
+                        id: done_header
+                        text: '已完成（0）  ▶'
+                        font_name: app.font_name
+                        font_size: sp(16)
+                        bold: True
+                        color: app.COLOR_TEXT
+                        halign: 'left'
+                        valign: 'middle'
+                        text_size: self.size
+                        background_normal: ''
+                        background_down: ''
+                        background_color: 0, 0, 0, 0
+                        size_hint_y: None
+                        height: dp(36)
+                        padding: dp(2), 0
+                        on_release: root.toggle_done()
+                    BoxLayout:
+                        id: done_list
+                        orientation: 'vertical'
+                        spacing: dp(2)
+                        size_hint_y: None
+                        height: 0
+                        opacity: 0
+                        disabled: True
+
+                Card:
+                    SectionTitle:
+                        text: '交接班摘要'
+                    Label:
+                        id: summary
+                        text: '本班患者名称：未绑定'
+                        font_name: app.font_name
+                        font_size: sp(15)
+                        color: app.COLOR_TEXT
+                        halign: 'left'
+                        valign: 'top'
+                        text_size: self.size
+                        size_hint_y: None
+                        height: dp(60)
 
         GateOverlay:
             opacity: 1 if not app.logged_in else 0
@@ -630,32 +925,31 @@
 # ======================================================================
 # 「登录」
 # ======================================================================
-
 <MineScreen>:
     FloatLayout:
+        canvas.before:
+            Color:
+                rgba: app.COLOR_BG
+            Rectangle:
+                pos: self.pos
+                size: self.size
         BoxLayout:
             orientation: 'vertical'
-            padding: dp(18), dp(14)
+            padding: dp(16), dp(12)
             spacing: dp(10)
-            canvas.before:
-                Color:
-                    rgba: app.COLOR_BG
-                Rectangle:
-                    pos: self.pos
-                    size: self.size
 
             GradientPanel:
-                color_a: app.GRAD_TAB_A
-                color_b: app.GRAD_TAB_B
-                radius: dp(16)
+                color_a: app.GRAD_TEAL_A
+                color_b: app.GRAD_TEAL_B
+                radius: dp(18)
                 size_hint_y: None
-                height: dp(84)
-                padding: dp(20), dp(14)
-                spacing: dp(4)
+                height: dp(116)
+                padding: dp(18), dp(12)
+                spacing: dp(2)
                 Label:
                     text: ('当前用户：%s' % app.current_user) if app.logged_in else '未登录'
                     font_name: app.font_name
-                    font_size: sp(17)
+                    font_size: sp(20)
                     bold: True
                     color: 1, 1, 1, 1
                     halign: 'left'
@@ -664,19 +958,26 @@
                     size_hint_y: None
                     height: dp(30)
                 Label:
-                    text: '已解锁「控制」「记录」' if app.logged_in else '完成登录后自动解锁全部模块'
+                    text: '患者名称：%s' % app.patient_label
                     font_name: app.font_name
-                    font_size: sp(12)
-                    color: 0.92, 0.99, 0.94, 0.95
+                    font_size: sp(20)
+                    bold: True
+                    color: 1, 1, 1, 1
+                    halign: 'left'
+                    valign: 'middle'
+                    text_size: self.size
+                    size_hint_y: None
+                    height: dp(30)
+                Label:
+                    text: '已登录，功能解锁完毕！' if app.logged_in else '完成登录后自动解锁全部模块'
+                    font_name: app.font_name
+                    font_size: sp(13)
+                    color: 0.92, 0.99, 0.97, 0.95
                     halign: 'left'
                     valign: 'middle'
                     text_size: self.size
                     size_hint_y: None
                     height: dp(24)
-
-            Widget:
-                size_hint_y: None
-                height: dp(4)
 
             LongButton:
                 text: '用户登录'
@@ -688,14 +989,18 @@
                 on_release: root.reserved('紧急呼叫')
 
             LongButton:
-                text: '用户信息'
+                text: '患者信息'
                 disabled: not app.logged_in
-                on_release: root.reserved('用户信息')
+                on_release: root.open_patient()
 
             LongButton:
-                text: '问题查询'
+                text: '常见问题'
                 disabled: not app.logged_in
-                on_release: root.reserved('问题查询')
+                on_release: root.open_faq()
+
+            LongButton:
+                text: '版本信息'
+                on_release: root.open_version()
 
             LongButton:
                 text: '退出登录'
@@ -710,7 +1015,6 @@
 # ======================================================================
 # 登录表单
 # ======================================================================
-
 <LoginScreen>:
     BoxLayout:
         orientation: 'vertical'
@@ -723,16 +1027,16 @@
                 size: self.size
 
         GradientPanel:
-            color_a: app.GRAD_TAB_A
-            color_b: app.GRAD_TAB_B
-            radius: dp(18)
+            color_a: app.GRAD_TEAL_A
+            color_b: app.GRAD_TEAL_B
+            radius: dp(20)
             size_hint_y: None
             height: dp(96)
             BoxLayout:
                 orientation: 'vertical'
                 padding: dp(18), dp(14)
                 Label:
-                    text: '绿联蓝牙助手'
+                    text: '合安智护'
                     font_name: app.font_name
                     font_size: sp(24)
                     bold: True
@@ -743,10 +1047,10 @@
                     size_hint_y: None
                     height: dp(36)
                 Label:
-                    text: '医疗设备蓝牙连接平台'
+                    text: '医疗设备蓝牙控制平台'
                     font_name: app.font_name
-                    font_size: sp(12)
-                    color: 0.92, 0.99, 0.94, 0.95
+                    font_size: sp(13)
+                    color: 0.92, 0.99, 0.97, 0.95
                     halign: 'left'
                     valign: 'middle'
                     text_size: self.size
@@ -762,7 +1066,7 @@
             Label:
                 text: '账号登录'
                 font_name: app.font_name
-                font_size: sp(17)
+                font_size: sp(18)
                 bold: True
                 color: app.COLOR_TEXT
                 halign: 'left'
@@ -782,13 +1086,14 @@
                 text: root.message
                 font_name: app.font_name
                 font_size: sp(12)
-                color: app.COLOR_PRIMARY_DARK if root.message_ok else app.COLOR_DANGER
+                color: app.COLOR_PRIMARY if root.message_ok else app.COLOR_DANGER
                 halign: 'left'
                 text_size: self.size
                 size_hint_y: None
                 height: dp(22) if root.message else 0
-            RoundButton:
+            SquareButton:
                 text: '登 录'
+                height: dp(48)
                 on_release: root.do_login()
             TextLink:
                 text: '还没有账号？点此注册'
@@ -799,7 +1104,6 @@
 # ======================================================================
 # 注册页
 # ======================================================================
-
 <RegisterScreen>:
     BoxLayout:
         orientation: 'vertical'
@@ -819,7 +1123,7 @@
             font_name: app.font_name
             font_size: sp(22)
             bold: True
-            color: app.COLOR_PRIMARY_DARK
+            color: app.COLOR_PRIMARY
             size_hint_y: None
             height: dp(36)
 
@@ -855,13 +1159,14 @@
                 text: root.message
                 font_name: app.font_name
                 font_size: sp(12)
-                color: app.COLOR_PRIMARY_DARK if root.message_ok else app.COLOR_DANGER
+                color: app.COLOR_PRIMARY if root.message_ok else app.COLOR_DANGER
                 halign: 'left'
                 text_size: self.size
                 size_hint_y: None
                 height: dp(22) if root.message else 0
-            RoundButton:
+            SquareButton:
                 text: '注 册'
+                height: dp(48)
                 on_release: root.do_register()
             TextLink:
                 text: '返回登录'
@@ -870,15 +1175,14 @@
         Widget:
 
 # ======================================================================
-# 弹窗
+# 弹窗（深色底 + 白字，保证任何机型上都看得清）
 # ======================================================================
-
 <InfoPopup>:
     title_font: app.font_name
     title_size: sp(15)
     title_color: 1, 1, 1, 1
     separator_color: 1, 1, 1, 0.22
-    background_color: 0.06, 0.10, 0.08, 1
+    background_color: 0.06, 0.10, 0.10, 1
     size_hint: 0.92, None
     height: dp(420)
     BoxLayout:
@@ -896,7 +1200,7 @@
     title_size: sp(16)
     title_color: 1, 1, 1, 1
     separator_color: 1, 1, 1, 0.22
-    background_color: 0.06, 0.10, 0.08, 1
+    background_color: 0.06, 0.10, 0.10, 1
     size_hint: 0.94, 0.86
     BoxLayout:
         orientation: 'vertical'
@@ -907,7 +1211,7 @@
             text: '正在扫描…'
             font_name: app.font_name
             font_size: sp(12)
-            color: 0.86, 0.96, 0.90, 1
+            color: 0.86, 0.96, 0.94, 1
             halign: 'left'
             text_size: self.size
             size_hint_y: None
@@ -926,7 +1230,7 @@
             text: ''
             font_name: app.font_name
             font_size: sp(10)
-            color: 0.78, 0.90, 0.83, 1
+            color: 0.78, 0.90, 0.86, 1
             halign: 'left'
             valign: 'top'
             text_size: self.size
@@ -937,17 +1241,21 @@
             spacing: dp(8)
             size_hint_y: None
             height: dp(44)
-            RoundButton:
+            SquareButton:
                 text: '我的收藏'
                 font_size: sp(13)
+                height: dp(44)
                 on_release: root.open_favorites()
-            RoundButton:
+            SquareButton:
                 text: '重新扫描'
                 font_size: sp(13)
+                height: dp(44)
                 on_release: root.restart_scan()
-            RoundButton:
+            SquareButton:
                 text: '关闭'
                 font_size: sp(13)
+                height: dp(44)
+                filled: False
                 on_release: root.dismiss()
 
 <FavoritePopup>:
@@ -956,7 +1264,7 @@
     title_size: sp(16)
     title_color: 1, 1, 1, 1
     separator_color: 1, 1, 1, 0.22
-    background_color: 0.06, 0.10, 0.08, 1
+    background_color: 0.06, 0.10, 0.10, 1
     size_hint: 0.94, 0.8
     BoxLayout:
         orientation: 'vertical'
@@ -967,7 +1275,7 @@
             text: '只显示当前扫描得到的收藏设备'
             font_name: app.font_name
             font_size: sp(12)
-            color: 0.86, 0.96, 0.90, 1
+            color: 0.86, 0.96, 0.94, 1
             halign: 'left'
             text_size: self.size
             size_hint_y: None
@@ -986,9 +1294,11 @@
             spacing: dp(8)
             size_hint_y: None
             height: dp(44)
-            RoundButton:
+            SquareButton:
                 text: '关 闭'
                 font_size: sp(13)
+                height: dp(44)
+                filled: False
                 on_release: root.dismiss()
 
 <ServicesPopup>:
@@ -997,7 +1307,7 @@
     title_size: sp(16)
     title_color: 1, 1, 1, 1
     separator_color: 1, 1, 1, 0.22
-    background_color: 0.06, 0.10, 0.08, 1
+    background_color: 0.06, 0.10, 0.10, 1
     size_hint: 0.94, 0.9
     BoxLayout:
         orientation: 'vertical'
@@ -1007,7 +1317,7 @@
             text: '下面列出设备暴露的全部服务与特征。把要写入的 UUID 填进 main.py 的 ESP32_WRITE_UUID 即可。'
             font_name: app.font_name
             font_size: sp(11)
-            color: 0.78, 0.90, 0.83, 1
+            color: 0.78, 0.90, 0.86, 1
             halign: 'left'
             valign: 'top'
             text_size: self.size
@@ -1064,69 +1374,41 @@
             text: '设备名称：未查询'
         BoxLayout:
             orientation: 'horizontal'
-            spacing: dp(8)
+            spacing: dp(6)
             size_hint_y: None
-            height: dp(44)
-            RoundButton:
+            height: dp(42)
+            SquareButton:
                 text: '重新发现'
                 font_size: sp(11)
+                height: dp(42)
+                filled: False
                 on_release: root.retry_discovery()
-            RoundButton:
+            SquareButton:
                 text: '复制列表'
                 font_size: sp(11)
+                height: dp(42)
+                filled: False
                 on_release: root.copy_list()
-            RoundButton:
+            SquareButton:
                 text: '刷新信息'
                 font_size: sp(11)
+                height: dp(42)
+                filled: False
                 on_release: root.refresh_module_info()
-            RoundButton:
+            SquareButton:
                 text: '关闭'
                 font_size: sp(11)
+                height: dp(42)
+                filled: False
                 on_release: root.dismiss()
 
-<LogDetailPopup>:
-    title_font: app.font_name
-    title_size: sp(15)
-    title_color: 1, 1, 1, 1
-    separator_color: 1, 1, 1, 0.22
-    background_color: 0.06, 0.10, 0.08, 1
-    size_hint: 0.94, 0.86
-    BoxLayout:
-        orientation: 'vertical'
-        spacing: dp(6)
-        padding: dp(6)
-        Label:
-            id: log_state
-            text: ''
-            font_name: app.font_name
-            font_size: sp(12)
-            color: 1, 1, 1, 0.96
-            halign: 'left'
-            valign: 'top'
-            text_size: self.size
-            size_hint_y: None
-            height: dp(24)
-        ScrollView:
-            id: log_scroll
-            do_scroll_x: False
-            bar_width: dp(3)
-            GridLayout:
-                id: log_list
-                cols: 1
-                spacing: dp(4)
-                size_hint_y: None
-                height: max(self.minimum_height, self.parent.height)
-        RoundButton:
-            text: '关 闭'
-            on_release: root.dismiss()
-
 <CommandInputPopup>:
-    title: '开发者：自定义命令包'
+    title: '自定义包'
     title_font: app.font_name
     title_size: sp(15)
     title_color: 1, 1, 1, 1
     separator_color: 1, 1, 1, 0.22
-    background_color: 0.06, 0.10, 0.08, 1
+    background_color: 0.06, 0.10, 0.10, 1
     size_hint: 0.95, 0.84
     BoxLayout:
         orientation: 'vertical'
@@ -1137,7 +1419,7 @@
             text: '填入十六进制命令包（偶数长度，例如 5401008031），点「发送」写进数据通道'
             font_name: app.font_name
             font_size: sp(11)
-            color: 0.78, 0.90, 0.83, 1
+            color: 0.78, 0.90, 0.86, 1
             halign: 'left'
             valign: 'top'
             text_size: self.size
@@ -1159,20 +1441,23 @@
             spacing: dp(6)
             size_hint_y: None
             height: dp(44)
-            RoundButton:
+            SquareButton:
                 text: '发送'
                 font_size: sp(13)
+                height: dp(44)
                 on_release: root.send()
-            RoundButton:
+            SquareButton:
                 text: '关闭'
                 font_size: sp(13)
+                height: dp(44)
+                filled: False
                 on_release: root.dismiss()
 
         Label:
             text: root.state
             font_name: app.font_name
             font_size: sp(11)
-            color: 0.86, 0.96, 0.90, 1
+            color: 0.86, 0.96, 0.94, 1
             halign: 'left'
             valign: 'top'
             text_size: self.size
@@ -1190,7 +1475,7 @@
     title_size: sp(15)
     title_color: 1, 1, 1, 1
     separator_color: 1, 1, 1, 0.22
-    background_color: 0.06, 0.10, 0.08, 1
+    background_color: 0.06, 0.10, 0.10, 1
     size_hint: 0.95, 0.72
     BoxLayout:
         orientation: 'vertical'
@@ -1201,7 +1486,7 @@
             text: '用 AT 指令实时修改模块串口波特率（立即生效、掉电保存）；每次连接 App 会自动锁成 9600'
             font_name: app.font_name
             font_size: sp(11)
-            color: 0.78, 0.90, 0.83, 1
+            color: 0.78, 0.90, 0.86, 1
             halign: 'left'
             valign: 'top'
             text_size: self.size
@@ -1224,13 +1509,15 @@
             spacing: dp(8)
             size_hint_y: None
             height: dp(44)
-            RoundButton:
+            SquareButton:
                 text: '9600'
                 font_size: sp(14)
+                height: dp(44)
                 on_release: root.choose(9600)
-            RoundButton:
+            SquareButton:
                 text: '115200'
                 font_size: sp(14)
+                height: dp(44)
                 on_release: root.choose(115200)
 
         BoxLayout:
@@ -1238,20 +1525,23 @@
             spacing: dp(8)
             size_hint_y: None
             height: dp(44)
-            RoundButton:
+            SquareButton:
                 text: '发送'
                 font_size: sp(14)
+                height: dp(44)
                 on_release: root.send()
-            RoundButton:
+            SquareButton:
                 text: '关闭'
                 font_size: sp(14)
+                height: dp(44)
+                filled: False
                 on_release: root.dismiss()
 
         Label:
             text: root.state
             font_name: app.font_name
             font_size: sp(11)
-            color: 0.86, 0.96, 0.90, 1
+            color: 0.86, 0.96, 0.94, 1
             halign: 'left'
             valign: 'top'
             text_size: self.size
@@ -1262,3 +1552,125 @@
             id: baud_reply
             orientation: 'vertical'
             spacing: dp(2)
+
+<ConfirmPopup>:
+    title_font: app.font_name
+    title_size: sp(16)
+    title_color: 1, 1, 1, 1
+    separator_color: 1, 1, 1, 0.22
+    background_color: 0.06, 0.10, 0.10, 1
+    size_hint: 0.9, 0.42
+    BoxLayout:
+        orientation: 'vertical'
+        spacing: dp(10)
+        padding: dp(8)
+        Label:
+            text: root.message
+            font_name: app.font_name
+            font_size: sp(14)
+            color: 1, 1, 1, 0.96
+            halign: 'left'
+            valign: 'top'
+            text_size: self.size
+        BoxLayout:
+            orientation: 'horizontal'
+            spacing: dp(10)
+            size_hint_y: None
+            height: dp(46)
+            SquareButton:
+                text: '取消'
+                font_size: sp(14)
+                height: dp(46)
+                filled: False
+                accent: app.COLOR_DISABLED
+                on_release: root.dismiss()
+            SquareButton:
+                text: '确认'
+                font_size: sp(14)
+                height: dp(46)
+                on_release: root.confirm()
+
+<PatientPopup>:
+    title_font: app.font_name
+    title_size: sp(16)
+    title_color: 1, 1, 1, 1
+    separator_color: 1, 1, 1, 0.22
+    background_color: 0.06, 0.10, 0.10, 1
+    size_hint: 0.94, 0.66
+    BoxLayout:
+        orientation: 'vertical'
+        spacing: dp(6)
+        padding: dp(8)
+
+        Label:
+            text: '第一行：患者姓名 / 床号（可包含中文、英文、数字）'
+            font_name: app.font_name
+            font_size: sp(11)
+            color: 0.78, 0.90, 0.86, 1
+            halign: 'left'
+            valign: 'top'
+            text_size: self.size
+            size_hint_y: None
+            height: dp(30)
+
+        TextInput:
+            id: p_label
+            text: root.label_text
+            font_name: app.font_name
+            font_size: sp(14)
+            multiline: False
+            size_hint_y: None
+            height: dp(44)
+            on_text: root.label_text = self.text
+
+        Label:
+            text: '第二行：蓝牙设备名称（只能英文和数字，用于改模块名）'
+            font_name: app.font_name
+            font_size: sp(11)
+            color: 0.78, 0.90, 0.86, 1
+            halign: 'left'
+            valign: 'top'
+            text_size: self.size
+            size_hint_y: None
+            height: dp(30)
+
+        TextInput:
+            id: p_name
+            text: root.name_text
+            font_name: app.font_name
+            font_size: sp(14)
+            multiline: False
+            size_hint_y: None
+            height: dp(44)
+            on_text: root.name_text = self.text
+
+        Label:
+            text: root.state_text
+            font_name: app.font_name
+            font_size: sp(11)
+            color: 0.98, 0.72, 0.68, 1
+            halign: 'left'
+            valign: 'top'
+            text_size: self.size
+            size_hint_y: None
+            height: dp(30)
+
+        Widget:
+
+        BoxLayout:
+            orientation: 'horizontal'
+            spacing: dp(8)
+            size_hint_y: None
+            height: dp(46)
+            SquareButton:
+                text: '取消'
+                font_size: sp(14)
+                height: dp(46)
+                filled: False
+                accent: app.COLOR_DISABLED
+                on_release: root.dismiss()
+            SquareButton:
+                text: '确认'
+                font_size: sp(14)
+                height: dp(46)
+                on_release: root.confirm()

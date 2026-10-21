@@ -15,6 +15,7 @@ import os
 import time
 
 from kivy.app import App
+from kivy.animation import Animation
 from kivy.clock import Clock
 from kivy.core.text import LabelBase
 from kivy.core.window import Window
@@ -31,6 +32,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.gridlayout import GridLayout
+from kivy.uix.image import Image
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen, ScreenManager
@@ -39,12 +41,12 @@ from kivy.uix.widget import Widget
 from kivy.utils import platform
 
 from accounts import AccountStore
-from protocol import (CMD_PRESETS, MAX_PAYLOAD, RxFrameParser,
-                      decode_text, to_hex)
+from protocol import (MAX_PAYLOAD, RxFrameParser, decode_text, to_hex)
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 KV_FILE = os.path.join(APP_DIR, 'ui.kv')
 FONT_FILE = os.path.join(APP_DIR, 'assets', 'fonts', 'NotoSansSC-Regular.ttf')
+BADGE_FILE = os.path.join(APP_DIR, 'assets', 'badge.png')
 
 # 系统中文字体兜底路径（未打包字体文件时使用）
 SYSTEM_FONTS = [
@@ -54,31 +56,37 @@ SYSTEM_FONTS = [
     '/system/fonts/DroidSansFallback.ttf',
 ]
 
+# 等宽字体（数字用）：安卓系统自带几种等宽字体，找不到就退回中文字体
+SYSTEM_MONO_FONTS = [
+    '/system/fonts/RobotoMono-Regular.ttf',
+    '/system/fonts/DroidSansMono.ttf',
+    '/system/fonts/CutiveMono.ttf',
+    'C:\\Windows\\Fonts\\consola.ttf',
+]
+
 
 # ----------------------------------------------------------------------
-# 主题色：医疗场景的活力绿
+# 主题色：医疗科技感（浅灰蓝背景 + 白色卡片 + 深青主色 + 医疗蓝辅助）
 # ----------------------------------------------------------------------
-COLOR_PRIMARY = [0.000, 0.784, 0.325, 1.0]       # #00C853
-COLOR_PRIMARY_DARK = [0.000, 0.545, 0.239, 1.0]  # #008B3D
-COLOR_BG = [0.953, 0.988, 0.965, 1.0]            # #F3FCF6
-COLOR_CARD = [1.000, 1.000, 1.000, 1.0]
-COLOR_LINE = [0.831, 0.902, 0.855, 1.0]          # #D4E6DA
-COLOR_TEXT = [0.075, 0.196, 0.118, 1.0]
-COLOR_TEXT_WEAK = [0.427, 0.522, 0.455, 1.0]
-COLOR_DANGER = [0.855, 0.208, 0.271, 1.0]
-COLOR_DISABLED = [0.776, 0.839, 0.796, 1.0]
+COLOR_PRIMARY = [0.043, 0.431, 0.431, 1.0]       # #0B6E6E 深青
+COLOR_PRIMARY_DARK = [0.027, 0.318, 0.318, 1.0]  # #074F4F
+COLOR_BLUE = [0.184, 0.502, 0.929, 1.0]          # #2F80ED 医疗蓝
+COLOR_BG = [0.965, 0.973, 0.980, 1.0]            # #F6F8FA 背景
+COLOR_CARD = [1.000, 1.000, 1.000, 1.0]          # #FFFFFF 卡片
+COLOR_LINE = [0.894, 0.906, 0.925, 1.0]          # #E4E7EC 分割线
+COLOR_TEXT = [0.086, 0.125, 0.165, 1.0]          # #16202A 主文本
+COLOR_TEXT_WEAK = [0.357, 0.420, 0.478, 1.0]     # #5B6B7A 次文本
+COLOR_DANGER = [0.851, 0.176, 0.125, 1.0]        # #D92D20 报错
+COLOR_WARN_HIGH = [0.969, 0.565, 0.035, 1.0]     # #F79009 高
+COLOR_WARN_MID = [0.992, 0.690, 0.133, 1.0]      # #FDB022 中
+COLOR_OK = [0.071, 0.718, 0.416, 1.0]            # #12B76A 提示/正常
+COLOR_DISABLED = [0.596, 0.635, 0.702, 1.0]      # #98A2B3 禁用
 
 # 渐变配色（线性渐变，两端颜色）
-GRAD_NAVY_A = [0.043, 0.098, 0.263, 1.0]         # 深蓝（显示屏左上）
-GRAD_NAVY_B = [0.055, 0.271, 0.478, 1.0]         # 亮蓝（显示屏右下）
-GRAD_LINK_A = [0.000, 0.412, 0.361, 1.0]         # 深绿（连接类按钮）
-GRAD_LINK_B = [0.290, 0.871, 0.647, 1.0]         # 苹果绿
-GRAD_FUNC_A = [0.180, 0.412, 0.118, 1.0]         # 草绿深
-GRAD_FUNC_B = [0.612, 0.800, 0.396, 1.0]         # 草绿浅
-GRAD_LOG_A = [0.106, 0.278, 0.541, 1.0]          # 日志按钮蓝
-GRAD_LOG_B = [0.310, 0.651, 0.902, 1.0]
-GRAD_TAB_A = [0.000, 0.545, 0.239, 1.0]          # 底部导航
-GRAD_TAB_B = [0.000, 0.784, 0.325, 1.0]
+GRAD_NAVY_A = [0.043, 0.098, 0.145, 1.0]         # 开发者显示屏（深墨青）
+GRAD_NAVY_B = [0.043, 0.431, 0.431, 1.0]
+GRAD_TEAL_A = [0.027, 0.318, 0.318, 1.0]         # 页头卡片（深青）
+GRAD_TEAL_B = [0.043, 0.514, 0.514, 1.0]
 
 # ======================================================================
 # ESP32 通信配置 —— 只改这一段就能适配你的固件
@@ -132,18 +140,37 @@ WRITE_IDLE, WRITE_SENDING, WRITE_SUCCESS, WRITE_FAILED = 0, 1, 2, 3
 
 # 显示屏最多保留多少行（超过就丢掉最早的）
 MAX_DISPLAY_LINES = 200
-# 「记录」里最多保存几次登录的日志
-MAX_SESSION_LOGS = 5
-# 「启动」「停止」两个预制命令包
-PRESET_HEX = dict(CMD_PRESETS)
 
 # 每次连上模块后，App 自动通过蓝牙 AT 通道锁定的模块配置
 #   —— 不需要任何电脑端脚本参与
-# 默认串口波特率 9600（「控制」页的「波特率」按钮可随时再用 AT+UART 改）
+# 只锁串口波特率；**不再自动改模块名称**（名称跟「患者信息」走，由用户确认后下发，
+# 避免每次连接都把用户设好的设备名冲掉）
 MODULE_TARGET_BAUD = 9600
-MODULE_TARGET_NAME = 'HFUT.BLE'
-MODULE_SETUP_COMMANDS = ('AT+UART=%d' % MODULE_TARGET_BAUD,
-                         'AT+NAME=0,%s' % MODULE_TARGET_NAME)
+MODULE_SETUP_COMMANDS = ('AT+UART=%d' % MODULE_TARGET_BAUD,)
+# 开发者模式「信息复原」用的模块名
+RESET_MODULE_NAME = 'HFUT.BLE'
+
+# 「记录」页固定 4 条待办任务
+DEFAULT_TASKS = ('待确认参数', '待更换耗材', '待处理告警', '患者不适上报')
+
+# 控制页 9 个功能键：名称 -> (命令包, 设备动作, 渐进倒计时秒数)
+FUNCTION_SPECS = (
+    ('充气', '5401084630', 'pump1_on', 0),
+    ('渐进充气', '5401008031', 'pump1_on', 5),
+    ('停止充气', '54010140F0', 'pump1_off', 0),
+    ('放气', '54010241B0', 'pump2_on', 0),
+    ('渐进放气', '5401044330', 'pump2_on', 5),
+    ('停止放气', '5401038171', 'pump2_off', 0),
+    ('急停', '54010583F1', 'stop', 0),
+    ('复位', '54010682B1', 'reset', 0),
+    ('刷新监测', '5401074270', 'refresh', 0),
+)
+FUNCTION_BY_NAME = dict((name, (hex_data, action, seconds))
+                        for name, hex_data, action, seconds in FUNCTION_SPECS)
+
+APP_VERSION = 'C_V1.0'
+APP_NAME = '合安智护'
+APP_SUBTITLE = '医疗设备蓝牙控制平台'
 
 
 def spaced_hex(hex_text):
@@ -185,6 +212,62 @@ def register_cjk_font():
             except Exception:
                 Logger.exception('BleAssistant: 字体注册失败 %s', path)
     return 'Roboto'
+
+
+def register_mono_font():
+    """注册等宽字体（数字对齐用）；找不到就沿用中文字体。"""
+    for path in SYSTEM_MONO_FONTS:
+        if os.path.exists(path):
+            try:
+                LabelBase.register(name='Mono', fn_regular=path)
+                return 'Mono'
+            except Exception:
+                Logger.exception('BleAssistant: 等宽字体注册失败 %s', path)
+    return 'CJK'
+
+
+class PatientStore(object):
+    """患者信息（【患者身份】+ 蓝牙设备名）按账号保存在本机。
+
+    登出再登录不会丢；新账号没有任何记录，显示"未绑定"。
+    """
+
+    def __init__(self, path):
+        self._path = path
+        self._items = {}
+        self._load()
+
+    def _load(self):
+        try:
+            with open(self._path, 'r', encoding='utf-8') as handle:
+                raw = json.load(handle)
+        except Exception:                                       # noqa: BLE001
+            return
+        if isinstance(raw, dict):
+            self._items = raw
+
+    def _save(self):
+        try:
+            with open(self._path, 'w', encoding='utf-8') as handle:
+                json.dump(self._items, handle, ensure_ascii=False)
+        except Exception:                                       # noqa: BLE001
+            Logger.exception('BleAssistant: 保存患者信息失败')
+
+    def get(self, username):
+        item = self._items.get(username) or {}
+        return {'label': str(item.get('label') or ''),
+                'ble_name': str(item.get('ble_name') or '')}
+
+    def save(self, username, label, ble_name):
+        if not username:
+            return
+        self._items[username] = {'label': label, 'ble_name': ble_name}
+        self._save()
+
+    def clear(self, username):
+        if username and username in self._items:
+            del self._items[username]
+            self._save()
 
 
 def create_ble_manager():
@@ -295,21 +378,96 @@ class GradientPanel(BoxLayout, _GradientCanvas):
         self._init_gradient()
 
 
-class CircleButton(ButtonBehavior, GradientPanel):
-    """圆形渐变按钮（按下时整体变淡，便于看清反馈）。"""
+class SquareButton(Button):
+    """方形圆角按钮 —— 全 App 统一用它，不再有任何圆形按钮。
 
-    text = StringProperty('')
-    font_size_hint = NumericProperty(sp(13))
+    filled=True 是实心（accent 为底色、白字）；filled=False 是白卡片 + accent 描边。
+    """
+
+    accent = ListProperty(COLOR_PRIMARY)
+    filled = BooleanProperty(True)
 
     def on_state(self, _widget, value):
-        self.opacity = 0.72 if value == 'down' else 1.0
+        self.opacity = 0.86 if value == 'down' else 1.0
 
 
-class TabButton(ButtonBehavior, GradientPanel):
-    """底部导航按钮。"""
+class TabButton(SquareButton):
+    """底部导航按钮（方形圆角，选中时实心）。"""
 
-    text = StringProperty('')
     active = BooleanProperty(False)
+
+
+class StatusBar(BoxLayout):
+    """顶部全局状态条：【患者身份】/ 断联记录 / 红色告警横幅。"""
+
+
+class TaskRow(ButtonBehavior, BoxLayout):
+    """「记录」页的一条待办：方形勾选框 + 标题（点整行切换勾选）。"""
+
+    checked = BooleanProperty(False)
+
+    def __init__(self, title, checked=False, on_toggle=None, **kwargs):
+        super(TaskRow, self).__init__(orientation='horizontal',
+                                      size_hint_y=None, height=dp(54),
+                                      padding=(dp(48), 0, dp(12), 0), **kwargs)
+        self.checked = checked
+        self._on_toggle = on_toggle
+        self._title = title
+        self._bg = InstructionGroup()
+        self.canvas.before.add(self._bg)
+        self.bind(pos=self._draw, size=self._draw, checked=self._draw,
+                  disabled=self._draw)
+        app = App.get_running_app()
+        self._label = Label(
+            text=title, font_name=app.font_name if app else 'Roboto',
+            font_size=sp(16), color=COLOR_TEXT, halign='left',
+            valign='middle', size_hint_x=1)
+        self._label.bind(size=lambda w, v: setattr(w, 'text_size', (v[0], v[1])))
+        self.add_widget(self._label)
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos) and not self.disabled:
+            return True
+        return super(TaskRow, self).on_touch_down(touch)
+
+    def on_touch_up(self, touch):
+        if self.collide_point(*touch.pos) and not self.disabled:
+            if self._on_toggle is not None:
+                self._on_toggle()
+            return True
+        return super(TaskRow, self).on_touch_up(touch)
+
+    def _draw(self, *args):
+        self._bg.clear()
+        if self.width <= 0 or self.height <= 0:
+            return
+        # 行底：白色圆角卡片
+        self._bg.add(Color(*COLOR_CARD))
+        self._bg.add(RoundedRectangle(pos=self.pos, size=self.size,
+                                      radius=[dp(12)]))
+        self._bg.add(Color(*COLOR_LINE))
+        self._bg.add(Line(rounded_rectangle=(self.x, self.y, self.width,
+                                             self.height, dp(12)), width=1))
+        # 勾选框：方形圆角 + 选中打勾
+        side = dp(24)
+        box_x = self.x + dp(12)
+        box_y = self.center_y - side / 2.0
+        if self.checked:
+            self._bg.add(Color(*COLOR_OK))
+            self._bg.add(RoundedRectangle(pos=(box_x, box_y), size=(side, side),
+                                          radius=[dp(7)]))
+            self._bg.add(Color(1, 1, 1, 1))
+            self._bg.add(Line(points=(box_x + dp(6), box_y + side * 0.5,
+                                      box_x + side * 0.44, box_y + dp(7),
+                                      box_x + side - dp(5), box_y + side - dp(6)),
+                              width=dp(2), joint='miter'))
+        else:
+            self._bg.add(Color(1, 1, 1, 1))
+            self._bg.add(RoundedRectangle(pos=(box_x, box_y), size=(side, side),
+                                          radius=[dp(7)]))
+            self._bg.add(Color(*COLOR_DISABLED))
+            self._bg.add(Line(rounded_rectangle=(box_x, box_y, side, side, dp(7)),
+                              width=1.4))
 
 
 class ScreenLine(Label):
@@ -829,74 +987,6 @@ class ServicesPopup(Popup):
             box.add_widget(row)
 
 
-# ----------------------------------------------------------------------
-# 回传记录
-# ----------------------------------------------------------------------
-class LogDetailPopup(Popup):
-    """「记录」页的日志详情：可上下拖动查看的历史内容。
-
-    行高固定、放在 ScrollView 里（与「服务/特征」的服务列表同一套写法，
-    这种写法在你的手机上已验证可正常显示）。
-    """
-
-    def __init__(self, title, lines, note='', **kwargs):
-        super(LogDetailPopup, self).__init__(title=title, **kwargs)
-        self._lines = list(lines)
-        self._note = note
-        self._last_width = -1.0
-        # 建好就立刻填内容：on_open 会延迟约 0.6 秒才派发，
-        # 只靠它会出现"弹窗已经打开、列表却是空的"。
-        self.refresh_list()
-        self.ids.log_scroll.bind(width=self._on_view_width)
-
-    def on_open(self, *args):
-        super(LogDetailPopup, self).on_open(*args)
-        self.refresh_list()
-
-    def _on_view_width(self, _widget, value):
-        if abs(value - self._last_width) < 1:
-            return
-        self._last_width = value
-        self.refresh_list()
-
-    def text_width(self):
-        """日志文字的可用宽度；还没排版时按常见弹窗宽度估一个。
-
-        宽度确定后 _on_view_width 会再渲染一次，所以这里的估值只是过渡。
-        """
-        width = self.ids.log_scroll.width - dp(10)
-        return width if width >= dp(120) else dp(320)
-
-    def refresh_list(self):
-        try:
-            box = self.ids.log_list
-        except Exception:                                       # noqa: BLE001
-            return
-        box.clear_widgets()
-        self.ids.log_state.text = self._note or '共 %d 行' % len(self._lines)
-        if not self._lines:
-            box.add_widget(LogEntryRow(text='（暂无记录）'))
-            return
-        # 按实际宽度截断：行高固定，文字换行会被裁掉且看不出来
-        width = self.text_width()
-        # 按时间顺序添加：最早的在最上面，最新的在最下面（像终端一样）
-        for line in self._lines:
-            box.add_widget(LogEntryRow(text=fit_text_width(line, width)))
-        Clock.schedule_once(self._scroll_to_bottom, 0)
-        Clock.schedule_once(self._scroll_to_bottom, 0.15)
-
-    def _scroll_to_bottom(self, _dt):
-        try:
-            scroll = self.ids.log_scroll
-            rows = self.ids.log_list.children
-            if rows:
-                scroll.scroll_to(rows[0], padding=0, animate=False)   # rows[0] = 最新
-            else:
-                scroll.scroll_y = 0.0
-        except Exception:                                       # noqa: BLE001
-            pass
-
-
 class CommandInputPopup(Popup):
     """「开发者」：用户自己输入命令包并发送。
 
@@ -1106,6 +1196,76 @@ class BaudRatePopup(Popup):
         lines = self._lines[-self.MAX_ROWS:] or ['（模块回复会显示在这里）']
         for line in lines:
             box.add_widget(PopupRow(text=line))
+
+
+def clip_hint(text):
+    """卡片/弹窗里的灰色提示行（固定高度，不会被裁掉）。"""
+    app = App.get_running_app()
+    label = Label(text=text, font_name=app.font_name if app else 'Roboto',
+                  font_size=sp(14), color=COLOR_TEXT_WEAK, halign='left',
+                  valign='middle', size_hint_y=None, height=dp(40))
+    label.bind(size=lambda w, v: setattr(w, 'text_size', (v[0], v[1])))
+    return label
+
+
+class DoneRow(Label):
+    """「已完成」折叠区里的一行。"""
+
+    def __init__(self, title, **kwargs):
+        app = App.get_running_app()
+        super(DoneRow, self).__init__(
+            text='✓  %s' % title,
+            font_name=app.font_name if app else 'Roboto',
+            font_size=sp(15), color=COLOR_TEXT_WEAK, halign='left',
+            valign='middle', size_hint_y=None, height=dp(40), **kwargs)
+        self.bind(size=lambda w, v: setattr(w, 'text_size', (v[0], v[1])))
+
+
+class ConfirmPopup(Popup):
+    """二次确认弹窗（批量确认等）。"""
+
+    message = StringProperty('')
+
+    def __init__(self, title='', message='', on_yes=None, **kwargs):
+        super(ConfirmPopup, self).__init__(title=title, **kwargs)
+        self.message = message
+        self._on_yes = on_yes
+
+    def confirm(self):
+        self.dismiss()
+        if self._on_yes is not None:
+            self._on_yes()
+
+
+class PatientPopup(Popup):
+    """患者信息：上一块任意文本（患者身份），下一块只能英文 + 数字（蓝牙模块名）。"""
+
+    label_text = StringProperty('')
+    name_text = StringProperty('')
+    state_text = StringProperty('')
+
+    def __init__(self, app, **kwargs):
+        super(PatientPopup, self).__init__(**kwargs)
+        self._app = app
+        data = app.patients.get(app.current_user)
+        self.label_text = data.get('label') or ''
+        self.name_text = data.get('ble_name') or ''
+        editing = bool(self.label_text or self.name_text)
+        self.title = '患者信息修改' if editing else '患者信息'
+        self.state_text = ('修改后需点「确认」才会生效' if editing
+                           else '第一行填患者姓名/床号，第二行只能英文和数字')
+
+    def confirm(self):
+        label = (self.label_text or '').strip()
+        name = (self.name_text or '').strip()
+        if not label:
+            self.state_text = '第一行不能为空：请填写患者姓名 / 床号'
+            return
+        if not name or not all(ch.isascii() and ch.isalnum() for ch in name):
+            self.state_text = '第二行只能包含英文字母和数字，请重填'
+            return
+        self.dismiss()
+        self._app.apply_patient(label, name)
 
 
 # ----------------------------------------------------------------------
@@ -1354,25 +1514,9 @@ class RegisterScreen(Screen):
         self.manager.current = 'loginform'
 
 
-class CtrlScreen(Screen):
-    """「控制」：蓝牙连接 / 显示屏 / 8 个圆形功能键。
+class _BleActions(object):
+    """控制页 / 开发者页共用的蓝牙动作（两页共用同一个 App 状态，互相继承）。"""
 
-    BLE 的轮询与接收统一放在 App 上（切到别的页也不会断），
-    这里只负责界面动作。
-    """
-
-    def __init__(self, **kwargs):
-        super(CtrlScreen, self).__init__(**kwargs)
-        self._cmd_popup = None
-        self._baud_popup = None
-
-    def on_leave(self, *args):
-        self._cmd_popup = None
-        self._baud_popup = None
-
-    # ------------------------------------------------------------------
-    # 蓝牙连接
-    # ------------------------------------------------------------------
     def open_device_dialog(self):
         app = App.get_running_app()
         if app.connected:
@@ -1391,63 +1535,54 @@ class CtrlScreen(Screen):
         app.ble.disconnect()
         app.note_manual_disconnect()
 
-    def open_services_dialog(self):
+
+class CtrlScreen(_BleActions, Screen):
+    """「控制」：设备监测卡 + 9 个功能键 + 蓝牙/患者/开发者。
+
+    BLE 的轮询与接收统一放在 App 上（切到别的页也不会断），这里只负责界面动作。
+    """
+
+    def press_function(self, name):
         app = App.get_running_app()
         if not app.connected:
-            show_info('未连接', '请先连接 BLE 设备，再查看它的服务与特征。')
+            show_info('未连接', '请先连接 BLE 设备，再使用该功能。')
             return
-        ServicesPopup(ble=app.ble).open()
+        spec = FUNCTION_BY_NAME.get(name)
+        if spec is None:
+            return
+        hex_data, action, seconds = spec
+        if not self.send_hex(name, hex_data):
+            return
+        app.apply_device_action(action, seconds)
 
-    # ------------------------------------------------------------------
-    # 功能键
-    # ------------------------------------------------------------------
-    def send_preset(self, name):
-        """「启动」「停止」：把预制命令包写进数据通道，结果全部进显示屏。"""
-        hex_data = PRESET_HEX.get(name)
-        if hex_data is None:
+    def open_patient(self):
+        app = App.get_running_app()
+        if not app.connected:
+            show_info('未连接', '请先连接 BLE 设备，再填写患者信息（需要用 AT 指令改模块名称）。')
             return
-        self.send_hex(name, hex_data)
+        PatientPopup(app).open()
 
     def open_developer(self):
-        """「开发者」：自定义命令包输入框。"""
-        app = App.get_running_app()
-        if not app.connected:
-            show_info('未连接', '请先连接 BLE 设备，再下发命令。')
-            return
-        self._cmd_popup = CommandInputPopup(ble=app.ble,
-                                            on_closed=self._on_cmd_popup_closed)
-        self._cmd_popup.open()
-
-    def _on_cmd_popup_closed(self):
-        self._cmd_popup = None
-
-    def open_baudrate(self):
-        """「波特率」：用 AT+UART 实时改模块的串口波特率。"""
-        app = App.get_running_app()
-        if not app.connected:
-            show_info('未连接', '请先连接 BLE 设备，再修改模块波特率。')
-            return
-        self._baud_popup = BaudRatePopup(ble=app.ble)
-        self._baud_popup.open()
+        App.get_running_app().enter_dev_mode()
 
     def send_hex(self, name, hex_data):
-        """把一段十六进制命令包写进数据通道，过程与结果都写进显示屏。"""
+        """把一段十六进制命令包写进数据通道；返回是否已受理。"""
         app = App.get_running_app()
         if not app.connected:
             show_info('未连接', '请先连接 BLE 设备，再下发命令。')
-            return
+            return False
 
         # 没有服务表就写不进去：先催一次服务发现，别让你对着"发送中…"干等
         service_count, _message = app.ble.discovery_state()
         if service_count <= 0:
             app.ble.ensure_services(force=True)
             app.log_line('✗ %s：设备服务尚未就绪，已重新发起服务发现，请 1~2 秒后再点' % name)
-            return
+            return False
 
         if len(hex_data) // 2 > MAX_PAYLOAD:
             app.log_line('✗ %s：命令 %d 字节，超过单次写入上限 %d 字节'
                          % (name, len(hex_data) // 2, MAX_PAYLOAD))
-            return
+            return False
 
         accepted, message = app.ble.send_command(ESP32_SERVICE_UUID,
                                                  ESP32_WRITE_UUID,
@@ -1456,24 +1591,21 @@ class CtrlScreen(Screen):
         if not accepted:
             app.log_line('✗ %s 下发失败：%s' % (name, message or '未知原因'))
             show_info('命令下发失败', '%s\n\n%s' % (message, self._feature_hint(app.ble)))
-            return
+            return False
         app.log_line('→ 已发送 %s（%d 字节）：%s'
                      % (name, len(hex_data) // 2, spaced_hex(hex_data)))
         # 等模块的回传命令包；一直没收到就明确写"0字节，未读取到有效信息"
         app.expect_return()
-        # 顺手向模块发一条 AT 查询：它的回复会以「← 收到 AT 回复」出现在显示屏上，
-        # 用来确认"模块确实在线、蓝牙链路双向都通"
+        # 顺手向模块发一条 AT 查询，确认模块在线、蓝牙链路双向都通
         if not app.ping_module():
             app.log_line('（AT 通道未就绪，本次没有做模块在线确认）')
+        return True
 
     def clear_screen(self):
         """一键清屏：只清显示屏里的提示信息。"""
         app = App.get_running_app()
         app.clear_display()
         app.log_line('已清屏')
-
-    def reserved(self, name):
-        show_info('功能预留', '「%s」为预留功能，后续可在此接入具体医疗设备指令。' % name)
 
     def _feature_hint(self, ble):
         """列出设备上可写 / 可通知的特征，UUID 填错时一眼知道该填什么。"""
@@ -1505,33 +1637,119 @@ class CtrlScreen(Screen):
             lines.append('  （无）')
         return '\n'.join(lines)
 
+
+class DevScreen(_BleActions, Screen):
+    """「开发者模式」：滚动显示屏 + 蓝牙键 + 信息复原 + 退出。"""
+
+    def clear_screen(self):
+        app = App.get_running_app()
+        app.clear_display()
+        app.log_line('已清屏')
+
+    def restore_info(self):
+        """信息复原：患者身份清空为未绑定，模块名改回 HFUT.BLE。"""
+        App.get_running_app().restore_patient()
+
+    def exit_dev(self):
+        App.get_running_app().exit_dev_mode()
+
     # 设备回传的统一处理在 App._on_reply 里（写进显示屏）
 
 class LogsScreen(Screen):
-    """「记录」：蓝牙日志（最近 5 次登录的显示屏内容）+ 诊断记录（预留）。"""
+    """「记录」：待办任务 + 已完成折叠区 + 交接班摘要。"""
 
-    def open_session(self, index):
+    def __init__(self, **kwargs):
+        super(LogsScreen, self).__init__(**kwargs)
+        self._done_open = False
+
+    def on_pre_enter(self, *args):
+        self.refresh()
+
+    def refresh(self):
         app = App.get_running_app()
-        sessions = list(app.sessions)
-        if index >= len(sessions):
-            show_info('蓝牙日志 %d' % (index + 1),
-                      '这一格还没有记录。\n\n每次退出登录时，会把本次登录期间'
-                      '显示屏里的内容存进这里，最多保留 %d 次。' % MAX_SESSION_LOGS)
+        try:
+            box = self.ids.task_list
+        except Exception:                                       # noqa: BLE001
             return
-        item = sessions[index]
-        LogDetailPopup(title='蓝牙日志 %d · %s' % (index + 1, item.get('label', '')),
-                       lines=list(item.get('lines', [])),
-                       note='本次共 %d 行（可上下拖动查看）'
-                            % len(item.get('lines', []))).open()
+        box.clear_widgets()
+        pending = [(index, item) for index, item in enumerate(list(app.tasks))
+                   if not item.get('done')]
+        for index, item in pending:
+            box.add_widget(TaskRow(
+                item['title'], checked=False,
+                on_toggle=lambda i=index: self.toggle_task(i)))
+        if not pending:
+            box.add_widget(clip_hint('全部待办已处理完毕'))
+        box.height = max(box.minimum_height, dp(1))
+        self._refresh_done(app)
+        self._refresh_summary(app)
 
-    def open_diag(self, index):
-        show_info('诊断记录 %d' % (index + 1),
-                  '该功能暂时预留。\n\n后续可在这里接入：模块 AT 自检结果、'
-                  '连接失败原因、命令下发统计等诊断数据。')
+    def _refresh_done(self, app):
+        done = [item for item in app.tasks if item.get('done')]
+        try:
+            self.ids.done_header.text = '已完成（%d）  %s' % (
+                len(done), '▼' if self._done_open else '▶')
+            box = self.ids.done_list
+        except Exception:                                       # noqa: BLE001
+            return
+        box.clear_widgets()
+        if not self._done_open:
+            box.height = 0
+            box.opacity = 0
+            box.disabled = True
+            return
+        box.opacity = 1
+        box.disabled = False
+        if not done:
+            box.add_widget(clip_hint('还没有已完成的任务'))
+        for item in done:
+            box.add_widget(DoneRow(item['title']))
+        box.height = max(box.minimum_height, dp(1))
+
+    def _refresh_summary(self, app):
+        pending = len([item for item in app.tasks if not item.get('done')])
+        try:
+            self.ids.summary.text = (
+                '本班患者名称：%s\n处理告警 %d 条、待跟进 %d 项'
+                % (app.patient_label, app.alarm_count, pending))
+        except Exception:                                       # noqa: BLE001
+            pass
+
+    def toggle_done(self):
+        self._done_open = not self._done_open
+        self.refresh()
+
+    def toggle_task(self, index):
+        app = App.get_running_app()
+        tasks = [dict(item) for item in app.tasks]
+        if index >= len(tasks):
+            return
+        tasks[index]['done'] = not tasks[index]['done']
+        app.tasks = tasks
+        app.log_line(('✓ 已完成：' if tasks[index]['done'] else '↺ 恢复待办：')
+                     + tasks[index]['title'])
+        self.refresh()
+
+    def confirm_all(self):
+        app = App.get_running_app()
+        if app.tasks and all(item.get('done') for item in app.tasks):
+            show_info('批量确认', '当前没有未完成的待办任务。')
+            return
+        ConfirmPopup(
+            title='批量确认',
+            message='确认把全部待办任务标记为已完成？\n\n该操作会同时更新交接班摘要。',
+            on_yes=self._do_confirm_all).open()
+
+    def _do_confirm_all(self):
+        app = App.get_running_app()
+        app.tasks = [dict(item, done=True) for item in app.tasks]
+        app.log_line('✓ 批量确认：全部待办标记为已完成')
+        app.show_notice('批量确认完成')
+        self.refresh()
 
 
 class MineScreen(Screen):
-    """「登录」：用户登录 / 紧急呼叫 / 用户信息 / 问题查询。"""
+    """「登录」：用户登录 / 紧急呼叫 / 患者信息 / 常见问题 / 版本信息。"""
 
     def open_login(self):
         app = App.get_running_app()
@@ -1547,6 +1765,30 @@ class MineScreen(Screen):
     def do_logout(self):
         App.get_running_app().logout()
 
+    def open_patient(self):
+        app = App.get_running_app()
+        if not app.logged_in:
+            show_info('患者信息', '请先登录。')
+            return
+        data = app.patients.get(app.current_user)
+        show_info('患者信息',
+                  '患者身份：%s\n蓝牙模块名称：%s\n\n'
+                  '如需修改，请到「控制」页点「患者信息」（需先连接蓝牙）。'
+                  % (app.patient_label, data.get('ble_name') or '未绑定'))
+
+    def open_faq(self):
+        show_info('常见问题',
+                  '1. 搜索不到设备？\n'
+                  '   确认蓝牙已打开、设备在附近，并已允许「附近的设备」权限。\n\n'
+                  '2. 连接后按钮是灰的？\n'
+                  '   说明蓝牙未连上，请重新点「蓝牙连接」。\n\n'
+                  '3. 下发命令无回传？\n'
+                  '   显示屏会写「0字节，未读取到有效信息」，请检查模块与串口。')
+
+    def open_version(self):
+        show_info('版本信息', '%s\n%s\n\n当前版本：%s'
+                  % (APP_NAME, APP_SUBTITLE, APP_VERSION))
+
     def reserved(self, name):
         show_info(name, '「%s」暂时预留。' % name)
 
@@ -1555,55 +1797,83 @@ class MineScreen(Screen):
 # App
 # ----------------------------------------------------------------------
 class BleAssistantApp(App):
-    title = '绿联蓝牙助手'
+    title = APP_NAME
 
     font_name = StringProperty('Roboto')
+    mono_font = StringProperty('Roboto')
     current_user = StringProperty('')
     logged_in = BooleanProperty(False)
     active_tab = StringProperty('mine')
+    dev_mode = BooleanProperty(False)
 
     # 连接状态（由 App 统一轮询，切到任何页面都不会中断）
     status_text = StringProperty('未连接')
     status_detail = StringProperty('点击「蓝牙连接」搜索附近的 BLE 设备')
     connected = BooleanProperty(False)
 
-    # 显示屏内容 / 「记录」里保存的最近几次登录日志
+    # 顶部全局状态条：【患者身份】/ 断联记录 / 告警横幅
+    patient_label = StringProperty('未绑定')
+    bar_mode = StringProperty('patient')      # patient / notice / alarm
+    bar_message = StringProperty('')
+    bar_opacity = NumericProperty(1.0)
+
+    # 设备监测卡
+    battery_text = StringProperty('NA')
+    pressure_text = StringProperty('NA')
+    temp_text = StringProperty('NA')
+    ble_state_text = StringProperty('未连接')
+    pump1 = StringProperty('关')
+    pump2 = StringProperty('关')
+    device_state_text = StringProperty('泵1 关 · 泵2 关')
+    countdown_text = StringProperty('')
+
+    # 显示屏内容 / 待办任务 / 告警计数
     display_lines = ListProperty([])
-    sessions = ListProperty([])
+    tasks = ListProperty([])
     at_reply_count = NumericProperty(0)
+    alarm_count = NumericProperty(0)
 
     COLOR_PRIMARY = ListProperty(COLOR_PRIMARY)
     COLOR_PRIMARY_DARK = ListProperty(COLOR_PRIMARY_DARK)
+    COLOR_BLUE = ListProperty(COLOR_BLUE)
     COLOR_BG = ListProperty(COLOR_BG)
     COLOR_CARD = ListProperty(COLOR_CARD)
     COLOR_LINE = ListProperty(COLOR_LINE)
     COLOR_TEXT = ListProperty(COLOR_TEXT)
     COLOR_TEXT_WEAK = ListProperty(COLOR_TEXT_WEAK)
     COLOR_DANGER = ListProperty(COLOR_DANGER)
+    COLOR_WARN_HIGH = ListProperty(COLOR_WARN_HIGH)
+    COLOR_WARN_MID = ListProperty(COLOR_WARN_MID)
+    COLOR_OK = ListProperty(COLOR_OK)
     COLOR_DISABLED = ListProperty(COLOR_DISABLED)
 
     GRAD_NAVY_A = ListProperty(GRAD_NAVY_A)
     GRAD_NAVY_B = ListProperty(GRAD_NAVY_B)
-    GRAD_LINK_A = ListProperty(GRAD_LINK_A)
-    GRAD_LINK_B = ListProperty(GRAD_LINK_B)
-    GRAD_FUNC_A = ListProperty(GRAD_FUNC_A)
-    GRAD_FUNC_B = ListProperty(GRAD_FUNC_B)
-    GRAD_LOG_A = ListProperty(GRAD_LOG_A)
-    GRAD_LOG_B = ListProperty(GRAD_LOG_B)
-    GRAD_TAB_A = ListProperty(GRAD_TAB_A)
-    GRAD_TAB_B = ListProperty(GRAD_TAB_B)
+    GRAD_TEAL_A = ListProperty(GRAD_TEAL_A)
+    GRAD_TEAL_B = ListProperty(GRAD_TEAL_B)
 
-    # 显示屏的渐变底图（在 KV 的 canvas.before 里用，避免自定义布局类的定位问题）
+    # 渐变底图（在 KV 的 canvas.before 里用，避免自定义布局类的定位问题）
     navy_gradient = ObjectProperty(None, allownone=True)
+    teal_gradient = ObjectProperty(None, allownone=True)
+    # 设备徽章图片（eg.png 里显示屏右侧那张，直接打包进来显示）
+    badge_source = StringProperty('')
+    # 开发者自定义包弹窗（回传要转发给它）
+    cmd_popup = ObjectProperty(None, allownone=True)
 
     def build(self):
         self.font_name = register_cjk_font()
+        self.mono_font = register_mono_font()
         self.ble = create_ble_manager()
         self.navy_gradient = gradient_texture(GRAD_NAVY_A, GRAD_NAVY_B)
+        self.teal_gradient = gradient_texture(GRAD_TEAL_A, GRAD_TEAL_B)
+        self.badge_source = BADGE_FILE if os.path.exists(BADGE_FILE) else ''
         self.store = AccountStore(os.path.join(self.user_data_dir, 'accounts.db'))
+        self.patients = PatientStore(
+            os.path.join(self.user_data_dir, 'patient.json'))
         self.favorites = FavoriteStore(
             os.path.join(self.user_data_dir, 'favorites.json'))
         self.pending_favorite = None
+        self._patient_ble_name = ''
         self._parser = RxFrameParser()
         self._notify_subscribed = False
         self._at_subscribed = False
@@ -1618,6 +1888,12 @@ class BleAssistantApp(App):
         self._return_base = 0
         # GATT 偶发报断开时的防抖计数
         self._disconnect_streak = 0
+        # 顶部状态条 / 倒计时
+        self._bar_event = None
+        self._countdown_event = None
+        self._countdown_left = 0
+        self._manual_disconnect = False
+        self.last_snapshot = []
 
         Window.bind(on_keyboard=self._on_keyboard)
         Builder.load_file(KV_FILE)
@@ -1656,7 +1932,13 @@ class BleAssistantApp(App):
     def login_succeeded(self, username):
         self.current_user = username
         self.logged_in = True
-        # 每次登录都从干净的显示屏开始
+        self._load_patient(username)
+        # 待办按账号隔离，且只对本次登录有效：每次登录都从全部未勾选开始
+        self.tasks = [{'title': title, 'done': False} for title in DEFAULT_TASKS]
+        self.alarm_count = 0
+        self.dev_mode = False
+        self._reset_monitor()
+        self.bar_mode = 'patient'
         self.clear_display()
         self.log_line('登录成功：%s' % username)
         self.log_line('点「蓝牙连接」选择设备，连接成功后即可下发命令')
@@ -1668,10 +1950,15 @@ class BleAssistantApp(App):
             self.ble.disconnect()
         except Exception:
             Logger.exception('BleAssistant: 退出登录时断开连接失败')
-        # 先把本次登录的显示屏内容存档，再清屏
-        self.save_session()
         self.current_user = ''
         self.logged_in = False
+        self.patient_label = '未绑定'
+        self._patient_ble_name = ''
+        self.tasks = []
+        self.alarm_count = 0
+        self.dev_mode = False
+        self._reset_monitor()
+        self.bar_mode = 'patient'
         self.clear_display()
         self.active_tab = 'mine'
         self.root.ids.sm.current = 'mine'
@@ -1680,15 +1967,177 @@ class BleAssistantApp(App):
         except Exception:                                       # noqa: BLE001
             pass
 
-    def save_session(self):
-        """把本次登录期间显示屏的内容存进「记录」，最多保留 MAX_SESSION_LOGS 次。"""
-        lines = list(self.display_lines)
-        if not lines:
+    # ------------------------------------------------------------------
+    # 患者信息（按账号保存，登出再登录不丢）
+    # ------------------------------------------------------------------
+    def _load_patient(self, username):
+        data = self.patients.get(username)
+        self._patient_ble_name = data.get('ble_name') or ''
+        self.patient_label = data.get('label') or '未绑定'
+
+    def apply_patient(self, label, ble_name):
+        """确认患者信息：存到账号下，并把第二块内容写成蓝牙模块名称。"""
+        self.patients.save(self.current_user, label, ble_name)
+        self.patient_label = label or '未绑定'
+        self._patient_ble_name = ble_name
+        self.log_line('患者信息已更新：%s（模块名 %s）' % (label, ble_name))
+        ok, message = self.rename_module(ble_name)
+        if not ok:
+            self.log_line('✗ 模块改名未下发：%s' % (message or '未知原因'))
+        self.show_notice('患者信息已保存')
+
+    def restore_patient(self):
+        """开发者模式「信息复原」：患者身份抹回未绑定，模块名改回 HFUT.BLE。"""
+        if self.current_user:
+            self.patients.clear(self.current_user)
+        self.patient_label = '未绑定'
+        self._patient_ble_name = ''
+        self.log_line('信息复原：患者身份已清空，模块名恢复为 %s' % RESET_MODULE_NAME)
+        ok, message = self.rename_module(RESET_MODULE_NAME)
+        if ok:
+            self.show_notice('信息复原完成')
+        else:
+            self.show_notice('信息已清空（模块改名未下发）')
+            self.log_line('✗ 模块改名未下发：%s' % (message or '未知原因'))
+
+    def rename_module(self, name):
+        """用 AT 指令把连接的蓝牙模块改名（AT+NAME=0,<name>）。"""
+        if not self.connected:
+            return False, '未连接设备'
+        if not self._at_subscribed:
+            return False, 'AT 通道未就绪'
+        command = 'AT+NAME=0,%s' % name
+        accepted, message = self.ble.send_command(
+            '', ESP32_AT_UUID, to_hex((command + '\r\n').encode('utf-8')))
+        if accepted:
+            self.log_line('→ 已发送 模块改名：%s' % command)
+        return accepted, message
+
+    # ------------------------------------------------------------------
+    # 顶部全局状态条
+    # ------------------------------------------------------------------
+    def show_alarm(self, text, duration=3.0):
+        """红色告警横幅：3 秒后自动回到【患者身份】。"""
+        self.bar_message = text
+        self.bar_mode = 'alarm'
+        self.bar_opacity = 0.35
+        Animation(bar_opacity=1.0, d=0.2).start(self)
+        self._schedule_bar_reset(duration)
+
+    def show_notice(self, text, duration=3.0):
+        """普通提示：同样显示在顶部，3 秒后回到【患者身份】。"""
+        self.bar_message = text
+        self.bar_mode = 'notice'
+        self._schedule_bar_reset(duration)
+
+    def _schedule_bar_reset(self, duration):
+        if self._bar_event is not None:
+            self._bar_event.cancel()
+            self._bar_event = None
+        if duration > 0:
+            self._bar_event = Clock.schedule_once(self._reset_bar, duration)
+
+    def _reset_bar(self, _dt):
+        self._bar_event = None
+        self.bar_mode = 'patient'
+        self.bar_message = ''
+        self.bar_opacity = 1.0
+
+    # ------------------------------------------------------------------
+    # 设备监测 / 功能键状态
+    # ------------------------------------------------------------------
+    def _reset_monitor(self):
+        self.battery_text = 'NA'
+        self.pressure_text = 'NA'
+        self.temp_text = 'NA'
+        self.pump1 = '关'
+        self.pump2 = '关'
+        self.device_state_text = '泵1 关 · 泵2 关'
+        self.ble_state_text = '已连接' if self.connected else '未连接'
+        self.stop_countdown()
+
+    def apply_device_action(self, action, seconds=0):
+        """按下功能键后同步"设备状态"与 5 秒倒计时。"""
+        if action == 'pump1_on':
+            self.pump1 = '开'
+            self._start_countdown(seconds)
+        elif action == 'pump1_off':
+            self.pump1 = '关'
+            self.stop_countdown()
+        elif action == 'pump2_on':
+            self.pump2 = '开'
+            self._start_countdown(seconds)
+        elif action == 'pump2_off':
+            self.pump2 = '关'
+            self.stop_countdown()
+        elif action in ('stop', 'reset'):
+            self.pump1 = '关'
+            self.pump2 = '关'
+            self.stop_countdown()
+        self.device_state_text = '泵1 %s · 泵2 %s' % (self.pump1, self.pump2)
+
+    def _start_countdown(self, seconds):
+        self.stop_countdown()
+        if not seconds:
             return
-        saved = [{'label': time.strftime('%m-%d %H:%M'), 'lines': lines}]
-        saved.extend(list(self.sessions))
-        del saved[MAX_SESSION_LOGS:]
-        self.sessions = saved
+        self._countdown_left = int(seconds)
+        self.countdown_text = '剩余时间 %ds' % self._countdown_left
+        self._countdown_event = Clock.schedule_interval(self._tick_countdown, 1.0)
+
+    def _tick_countdown(self, _dt):
+        self._countdown_left -= 1
+        if self._countdown_left <= 0:
+            self.stop_countdown()
+            return
+        self.countdown_text = '剩余时间 %ds' % self._countdown_left
+
+    def stop_countdown(self):
+        if self._countdown_event is not None:
+            self._countdown_event.cancel()
+            self._countdown_event = None
+        self._countdown_left = 0
+        self.countdown_text = ''
+
+    # ------------------------------------------------------------------
+    # 开发者模式
+    # ------------------------------------------------------------------
+    def enter_dev_mode(self):
+        if not self.logged_in:
+            return
+        self.dev_mode = True
+        self.log_line('已进入开发者模式')
+        self.root.ids.sm.current = 'dev'
+
+    def exit_dev_mode(self):
+        self.dev_mode = False
+        self.active_tab = 'ctrl'
+        self.root.ids.sm.current = 'ctrl'
+
+    # ------------------------------------------------------------------
+    # 开发者模式底部三个功能键
+    # ------------------------------------------------------------------
+    def open_services(self):
+        if not self.connected:
+            show_info('未连接', '请先连接 BLE 设备，再查看它的服务与特征。')
+            return
+        ServicesPopup(ble=self.ble).open()
+
+    def open_baudrate(self):
+        if not self.connected:
+            show_info('未连接', '请先连接 BLE 设备，再修改模块波特率。')
+            return
+        BaudRatePopup(ble=self.ble).open()
+
+    def open_command(self):
+        if not self.connected:
+            show_info('未连接', '请先连接 BLE 设备，再下发命令。')
+            return
+        self.cmd_popup = CommandInputPopup(ble=self.ble,
+                                           on_closed=self._on_cmd_closed)
+        self.cmd_popup.open()
+
+    def _on_cmd_closed(self):
+        self.cmd_popup = None
 
     # ------------------------------------------------------------------
     # BLE 轮询（切页面也不停）
@@ -1714,13 +2163,31 @@ class BleAssistantApp(App):
             self.connected = connected
             self.log_line('● 已连接设备' if connected else '○ 已断开连接')
             if connected:
+                self._manual_disconnect = False
+                self.ble_state_text = '已连接'
                 self._remember_favorite()
             else:
+                manual = self._manual_disconnect
+                self._manual_disconnect = False
                 self.pending_favorite = None
+                self.ble_state_text = '未连接'
+                self._reset_monitor()
+                self._save_snapshot()
+                if manual:
+                    self.show_notice('蓝牙已断开 · 本次记录已保存')
+                else:
+                    self.alarm_count += 1
+                    self.show_alarm('蓝牙意外断开！请检查设备连接')
+                    self.log_line('⚠ 蓝牙意外断开，已记录本次会话')
 
         self._keep_notify(ble, connected)
         self._drain_at(ble)
         self._drain_incoming(ble)
+
+    def _save_snapshot(self):
+        """蓝牙断联即记录：保存本次会话的显示屏内容。"""
+        self.last_snapshot = list(self.display_lines)
+        self.log_line('○ 本次蓝牙记录已保存（%d 行）' % len(self.last_snapshot))
 
     def _remember_favorite(self):
         """真正连上之后，把设备归档进「我的收藏」。"""
@@ -1736,9 +2203,14 @@ class BleAssistantApp(App):
         """用户主动点「断开连接」：不等防抖，界面立刻显示已断开。"""
         self.pending_favorite = None
         self._disconnect_streak = 0
+        self._manual_disconnect = True
         if self.connected:
             self.connected = False
+            self.ble_state_text = '未连接'
+            self._reset_monitor()
             self.log_line('○ 已断开连接')
+            self._save_snapshot()
+            self.show_notice('蓝牙已断开 · 本次记录已保存')
 
     # ------------------------------------------------------------------
     # AT 通道：始终有人读，收到就上显示屏
@@ -1821,8 +2293,7 @@ class BleAssistantApp(App):
         self._at_busy = False
         self._module_configured = True
         if ok:
-            self.log_line('模块配置已锁定：串口 %d，设备名 %s'
-                          % (MODULE_TARGET_BAUD, MODULE_TARGET_NAME))
+            self.log_line('模块配置已锁定：串口 %d' % MODULE_TARGET_BAUD)
         else:
             self.log_line('模块配置锁定没有收到 OK（模块可能不支持 AT 指令，不影响收发）')
 
@@ -1875,10 +2346,7 @@ class BleAssistantApp(App):
         self.log_line('← 回传命令包 0x%02X（%d 字节）：%s'
                       % (cmd, len(raw), shown))
         Logger.info('BleAssistant: 收到回传 cmd=0x%02X 载荷=%r 原始=%s', cmd, text, raw_hex)
-        try:
-            popup = getattr(self.screen('ctrl'), '_cmd_popup', None)
-        except Exception:                                       # noqa: BLE001
-            popup = None
+        popup = self.cmd_popup
         if popup is not None:
             popup.add_reply(cmd, text, raw_hex)
 
@@ -1927,6 +2395,9 @@ class BleAssistantApp(App):
         # Android 返回键（27）与桌面 ESC 一致
         if key == 27:
             current = self.root.ids.sm.current
+            if current == 'dev':
+                self.exit_dev_mode()
+                return True
             if current == 'register':
                 self.screen('register').back_to_login()
                 return True
