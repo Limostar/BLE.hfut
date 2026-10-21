@@ -269,6 +269,14 @@ public final class BleHelper {
     private static final BluetoothGattCallback GATT_CALLBACK = new BluetoothGattCallback() {
         @Override
         public void onConnectionStateChange(BluetoothGatt g, int status, int newState) {
+            // A callback from an older BluetoothGatt instance (a previous
+            // connection attempt that was replaced) must not touch the current
+            // state: otherwise its late STATE_DISCONNECTED makes the UI show
+            // "disconnected" while the new link is actually alive.
+            if (g != gatt) {
+                Log.w(TAG, "onConnectionStateChange: ignoring a stale gatt callback");
+                return;
+            }
             connStatus = status;
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 connState = CONN_CONNECTED;
@@ -395,6 +403,18 @@ public final class BleHelper {
         }
         try {
             BluetoothDevice device = adapter.getRemoteDevice(address);
+            // Release the previous client interface first. Keeping it around
+            // lets its late callbacks (and its connection) interfere with the
+            // new one.
+            BluetoothGatt previous = gatt;
+            gatt = null;
+            if (previous != null) {
+                try {
+                    previous.disconnect();
+                    previous.close();
+                } catch (Throwable ignored) {
+                }
+            }
             connAddress = address;
             serviceCount = 0;
             discoveryAttempts = 0;
@@ -547,13 +567,7 @@ public final class BleHelper {
 
     public static void disconnect() {
         stopScan();
-        try {
-            if (gatt != null) {
-                gatt.disconnect();
-                gatt.close();
-            }
-        } catch (Throwable ignored) {
-        }
+        final BluetoothGatt previous = gatt;
         gatt = null;
         connState = CONN_DISCONNECTED;
         serviceCount = 0;
@@ -562,6 +576,68 @@ public final class BleHelper {
         discoveryMessage = "";
         resetWrites();
         resetNotify();
+        if (previous != null) {
+            try {
+                previous.disconnect();
+            } catch (Throwable ignored) {
+            }
+            // Close a bit later: closing immediately after disconnect() can
+            // leave the link up on some stacks, so the phone keeps the device
+            // connected while the UI already says "disconnected".
+            try {
+                new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(
+                        new Runnable() {
+                            @Override
+                            public void run() {
+                                try {
+                                    previous.close();
+                                } catch (Throwable ignored) {
+                                }
+                            }
+                        }, 800L);
+            } catch (Throwable t) {
+                try {
+                    previous.close();
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+    }
+
+    /**
+     * Corrects the cached connection state with the value reported by the
+     * system. Some phones drop or delay onConnectionStateChange callbacks, which
+     * left the UI showing "disconnected" while the GATT link was still up.
+     * Safe to call from the UI poll loop: it is a no-op while connecting or when
+     * there is no BluetoothGatt at all.
+     */
+    public static void syncConnectionState(Context ctx) {
+        BluetoothGatt g = gatt;
+        if (g == null || ctx == null) {
+            return;
+        }
+        int current = connState;
+        if (current == CONN_CONNECTING) {
+            return;
+        }
+        boolean linked;
+        try {
+            BluetoothManager manager =
+                    (BluetoothManager) ctx.getSystemService(Context.BLUETOOTH_SERVICE);
+            if (manager == null) {
+                return;
+            }
+            linked = manager.getConnectionState(g.getDevice(), BluetoothProfile.GATT)
+                    == BluetoothProfile.STATE_CONNECTED;
+        } catch (Throwable t) {
+            return;
+        }
+        if (linked && current != CONN_CONNECTED) {
+            // Only ever promote: the GATT callback stays authoritative for a real
+            // disconnect, so no transient system state can make the UI drop a
+            // live link.
+            connState = CONN_CONNECTED;
+        }
     }
 
     // ------------------------------------------------------------------

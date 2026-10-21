@@ -132,10 +132,11 @@
     size_hint_y: None
     height: dp(18)
 
+# 弹窗正文一律白字：弹窗是黑底，深墨绿字在手机上几乎看不见
 <ServiceRow>:
     font_name: app.font_name
     font_size: sp(11)
-    color: app.COLOR_TEXT
+    color: 1, 1, 1, 0.96
     halign: 'left'
     valign: 'top'
     text_size: self.size
@@ -145,7 +146,7 @@
 <PopupRow>:
     font_name: app.font_name
     font_size: sp(11)
-    color: app.COLOR_PRIMARY_DARK
+    color: 1, 1, 1, 0.96
     halign: 'left'
     valign: 'top'
     text_size: self.size
@@ -155,7 +156,7 @@
 <LogEntryRow>:
     font_name: app.font_name
     font_size: sp(11)
-    color: app.COLOR_TEXT
+    color: 1, 1, 1, 0.96
     halign: 'left'
     valign: 'top'
     text_size: self.size
@@ -167,7 +168,7 @@
 <DiagLine@Label>:
     font_name: app.font_name
     font_size: sp(10)
-    color: app.COLOR_TEXT
+    color: 1, 1, 1, 0.96
     halign: 'left'
     valign: 'top'
     text_size: self.size
@@ -372,15 +373,6 @@
                     # 至少撑满可视区：内容少时顶部对齐（否则 Kivy 会把它顶到底部，
                     # 上方留一大片空白、整体还会往下偏）
                     height: max(self.minimum_height, self.parent.height)
-            Slider:
-                id: dp_slider
-                orientation: 'vertical'
-                size_hint_x: None
-                width: dp(24)
-                min: 0
-                max: 1
-                value: 0
-                cursor_size: dp(16), dp(16)
         BoxLayout:
             orientation: 'horizontal'
             spacing: dp(8)
@@ -416,7 +408,9 @@
                     Line:
                         width: 1
                         rounded_rectangle: self.x, self.y, self.width, self.height, dp(8)
-                on_release: root.clear_screen()
+                # 注意：这里在 <DisplayPanel> 规则里，root 是显示屏而不是页面。
+                # 以前写成 root.clear_screen()，点下去直接 AttributeError 闪退。
+                on_release: app.screen('ctrl').clear_screen()
 
 <CtrlScreen>:
     FloatLayout:
@@ -882,8 +876,9 @@
 <InfoPopup>:
     title_font: app.font_name
     title_size: sp(15)
-    title_color: app.COLOR_PRIMARY_DARK
-    separator_color: app.COLOR_LINE
+    title_color: 1, 1, 1, 1
+    separator_color: 1, 1, 1, 0.22
+    background_color: 0.06, 0.10, 0.08, 1
     size_hint: 0.92, None
     height: dp(420)
     BoxLayout:
@@ -899,8 +894,9 @@
     title: '附近的 BLE 设备'
     title_font: app.font_name
     title_size: sp(16)
-    title_color: app.COLOR_PRIMARY_DARK
-    separator_color: app.COLOR_LINE
+    title_color: 1, 1, 1, 1
+    separator_color: 1, 1, 1, 0.22
+    background_color: 0.06, 0.10, 0.08, 1
     size_hint: 0.94, 0.86
     BoxLayout:
         orientation: 'vertical'
@@ -911,7 +907,7 @@
             text: '正在扫描…'
             font_name: app.font_name
             font_size: sp(12)
-            color: app.COLOR_TEXT_WEAK
+            color: 0.86, 0.96, 0.90, 1
             halign: 'left'
             text_size: self.size
             size_hint_y: None
@@ -930,7 +926,7 @@
             text: ''
             font_name: app.font_name
             font_size: sp(10)
-            color: app.COLOR_TEXT_WEAK
+            color: 0.78, 0.90, 0.83, 1
             halign: 'left'
             valign: 'top'
             text_size: self.size
@@ -942,6 +938,10 @@
             size_hint_y: None
             height: dp(44)
             RoundButton:
+                text: '我的收藏'
+                font_size: sp(13)
+                on_release: root.open_favorites()
+            RoundButton:
                 text: '重新扫描'
                 font_size: sp(13)
                 on_release: root.restart_scan()
@@ -950,12 +950,54 @@
                 font_size: sp(13)
                 on_release: root.dismiss()
 
+<FavoritePopup>:
+    title: '我的收藏'
+    title_font: app.font_name
+    title_size: sp(16)
+    title_color: 1, 1, 1, 1
+    separator_color: 1, 1, 1, 0.22
+    background_color: 0.06, 0.10, 0.08, 1
+    size_hint: 0.94, 0.8
+    BoxLayout:
+        orientation: 'vertical'
+        spacing: dp(6)
+        padding: dp(6)
+        Label:
+            id: fav_state
+            text: '只显示当前扫描得到的收藏设备'
+            font_name: app.font_name
+            font_size: sp(12)
+            color: 0.86, 0.96, 0.90, 1
+            halign: 'left'
+            text_size: self.size
+            size_hint_y: None
+            height: dp(22)
+        ScrollView:
+            do_scroll_x: False
+            bar_width: dp(3)
+            GridLayout:
+                id: fav_list
+                cols: 1
+                spacing: dp(6)
+                size_hint_y: None
+                height: max(self.minimum_height, self.parent.height)
+        BoxLayout:
+            orientation: 'horizontal'
+            spacing: dp(8)
+            size_hint_y: None
+            height: dp(44)
+            RoundButton:
+                text: '关 闭'
+                font_size: sp(13)
+                on_release: root.dismiss()
+
 <ServicesPopup>:
     title: '服务 / 特征'
     title_font: app.font_name
     title_size: sp(16)
-    title_color: app.COLOR_PRIMARY_DARK
-    separator_color: app.COLOR_LINE
+    title_color: 1, 1, 1, 1
+    separator_color: 1, 1, 1, 0.22
+    background_color: 0.06, 0.10, 0.08, 1
     size_hint: 0.94, 0.9
     BoxLayout:
         orientation: 'vertical'
@@ -965,7 +1007,7 @@
             text: '下面列出设备暴露的全部服务与特征。把要写入的 UUID 填进 main.py 的 ESP32_WRITE_UUID 即可。'
             font_name: app.font_name
             font_size: sp(11)
-            color: app.COLOR_TEXT_WEAK
+            color: 0.78, 0.90, 0.83, 1
             halign: 'left'
             valign: 'top'
             text_size: self.size
@@ -976,7 +1018,7 @@
             text: '尚未发现服务'
             font_name: app.font_name
             font_size: sp(11)
-            color: app.COLOR_PRIMARY_DARK
+            color: 1, 1, 1, 0.96
             halign: 'left'
             valign: 'top'
             text_size: self.size
@@ -996,7 +1038,7 @@
             text: '模块信息（AT 通道读取）：准备中…'
             font_name: app.font_name
             font_size: sp(11)
-            color: app.COLOR_PRIMARY_DARK
+            color: 1, 1, 1, 0.96
             halign: 'left'
             valign: 'top'
             text_size: self.size
@@ -1045,8 +1087,9 @@
 <LogDetailPopup>:
     title_font: app.font_name
     title_size: sp(15)
-    title_color: app.COLOR_PRIMARY_DARK
-    separator_color: app.COLOR_LINE
+    title_color: 1, 1, 1, 1
+    separator_color: 1, 1, 1, 0.22
+    background_color: 0.06, 0.10, 0.08, 1
     size_hint: 0.94, 0.86
     BoxLayout:
         orientation: 'vertical'
@@ -1057,7 +1100,7 @@
             text: ''
             font_name: app.font_name
             font_size: sp(12)
-            color: app.COLOR_PRIMARY_DARK
+            color: 1, 1, 1, 0.96
             halign: 'left'
             valign: 'top'
             text_size: self.size
@@ -1081,8 +1124,9 @@
     title: '开发者：自定义命令包'
     title_font: app.font_name
     title_size: sp(15)
-    title_color: app.COLOR_PRIMARY_DARK
-    separator_color: app.COLOR_LINE
+    title_color: 1, 1, 1, 1
+    separator_color: 1, 1, 1, 0.22
+    background_color: 0.06, 0.10, 0.08, 1
     size_hint: 0.95, 0.84
     BoxLayout:
         orientation: 'vertical'
@@ -1093,7 +1137,7 @@
             text: '填入十六进制命令包（偶数长度，例如 5401008031），点「发送」写进数据通道'
             font_name: app.font_name
             font_size: sp(11)
-            color: app.COLOR_TEXT_WEAK
+            color: 0.78, 0.90, 0.83, 1
             halign: 'left'
             valign: 'top'
             text_size: self.size
@@ -1128,7 +1172,7 @@
             text: root.state
             font_name: app.font_name
             font_size: sp(11)
-            color: app.COLOR_TEXT_WEAK
+            color: 0.86, 0.96, 0.90, 1
             halign: 'left'
             valign: 'top'
             text_size: self.size

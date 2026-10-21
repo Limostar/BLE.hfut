@@ -138,6 +138,11 @@ class AndroidBleManager(object):
                 self._helper.requestEnable(self._activity)
                 self._note = '蓝牙未开启，请在系统弹窗中开启蓝牙'
                 return
+            # 已经连上（或正在连）就不要再扫：扫描会拖慢/干扰 GATT 连接。
+            # start_scan() 里那个 0.8 秒的补发会在"刚选中设备"之后才执行，
+            # 以前会把扫描又拉起来。
+            if int(self._helper.getConnState()) in (CONN_CONNECTING, CONN_CONNECTED):
+                return
             if int(self._helper.getScanState()) == SCAN_RUNNING:
                 return
             if now - self._last_start < 0.5:
@@ -455,6 +460,12 @@ class AndroidBleManager(object):
         if not self.available:
             return '蓝牙不可用', self._init_error or '未找到蓝牙组件', False
         try:
+            # 先用系统的真实连接状态纠正 Java 侧缓存：
+            # GATT 回调偶尔会漏掉/迟到，界面就会出现"显示断开了、其实还连着"。
+            try:
+                self._helper.syncConnectionState(self._activity)
+            except Exception:
+                pass
             conn = int(self._helper.getConnState())
             scan = int(self._helper.getScanState())
             count = int(self._helper.getDeviceCount())

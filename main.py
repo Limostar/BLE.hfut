@@ -10,6 +10,7 @@
 登录成功后自动解锁。
 """
 
+import json
 import os
 import time
 
@@ -33,7 +34,6 @@ from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen, ScreenManager
-from kivy.uix.slider import Slider
 from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 from kivy.utils import platform
@@ -125,6 +125,8 @@ _NOTIFY_STATE_TEXT = {NOTIFY_OFF: '未订阅', NOTIFY_SUBSCRIBING: '订阅中',
 
 # 写入结果等待超时（秒）
 WRITE_TIMEOUT = 3.0
+# 发出命令后等「回传命令包」的窗口（秒）。给模块留足时间（功能一的第二条回传要 3 秒）
+RETURN_TIMEOUT = 3.5
 
 WRITE_IDLE, WRITE_SENDING, WRITE_SUCCESS, WRITE_FAILED = 0, 1, 2, 3
 
@@ -348,7 +350,7 @@ class LogEntryRow(Label):
 
 
 class DisplayPanel(BoxLayout):
-    """深蓝渐变"显示屏"：白字日志，右侧一根可拖拽的滑块。
+    """深蓝渐变"显示屏"：白字日志（拖拽屏幕本身即可滚动，不再有右侧滑块）。
 
     这里刻意用 **BoxLayout** 而不是自定义的 FloatLayout 容器：
     实测把内容放进 FloatLayout 型渐变容器里时，背景画在正确位置、
@@ -358,28 +360,11 @@ class DisplayPanel(BoxLayout):
     """
 
     def on_kv_post(self, _base_widget):
-        self._syncing = False
         self._last_width = -1.0
-        self.ids.dp_slider.bind(value=self._on_slider)
-        self.ids.dp_scroll.bind(scroll_y=self._on_scroll)
         # 可见宽度变了要按新宽度重新截断（第一次渲染时可能还没排版过）
         self.ids.dp_scroll.bind(width=self._on_view_width)
         App.get_running_app().bind(display_lines=self._render)
         self._render()
-
-    def _on_slider(self, _widget, value):
-        if self._syncing:
-            return
-        self._syncing = True
-        self.ids.dp_scroll.scroll_y = value
-        self._syncing = False
-
-    def _on_scroll(self, _widget, value):
-        if self._syncing:
-            return
-        self._syncing = True
-        self.ids.dp_slider.value = value
-        self._syncing = False
 
     def _on_view_width(self, _widget, value):
         if abs(value - self._last_width) < 1:
@@ -483,8 +468,80 @@ class InfoPopup(Popup):
             box.add_widget(PopupRow(text=clip_line(line)))
 
 
+class FavoriteStore(object):
+    """「我的收藏」：连接成功的设备自动归档，支持取消收藏。
+
+    存成一个 JSON 文件（放在 App 的私有目录里），重启 App 不会丢。
+    """
+
+    def __init__(self, path):
+        self._path = path
+        self._items = []
+        self._load()
+
+    def _load(self):
+        try:
+            with open(self._path, 'r', encoding='utf-8') as handle:
+                raw = json.load(handle)
+        except Exception:                                       # noqa: BLE001
+            return
+        if not isinstance(raw, list):
+            return
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            address = str(item.get('address') or '').strip()
+            if not address:
+                continue
+            self._items.append({'address': address,
+                                'name': str(item.get('name') or '').strip()})
+
+    def _save(self):
+        try:
+            with open(self._path, 'w', encoding='utf-8') as handle:
+                json.dump(self._items, handle, ensure_ascii=False)
+        except Exception:                                       # noqa: BLE001
+            Logger.exception('BleAssistant: 保存收藏设备失败')
+
+    def items(self):
+        return [dict(item) for item in self._items]
+
+    def has(self, address):
+        return any(item['address'] == address for item in self._items)
+
+    def add(self, device):
+        """归档一台设备；已存在时只更新名字。返回是否是新收藏。"""
+        address = str((device or {}).get('address') or '').strip()
+        if not address:
+            return False
+        name = str((device or {}).get('name') or '').strip()
+        for item in self._items:
+            if item['address'] == address:
+                if name and item['name'] != name:
+                    item['name'] = name
+                    self._save()
+                return False
+        self._items.append({'address': address, 'name': name or '未命名设备'})
+        self._save()
+        return True
+
+    def remove(self, address):
+        before = len(self._items)
+        self._items = [item for item in self._items
+                       if item['address'] != address]
+        if len(self._items) != before:
+            self._save()
+            return True
+        return False
+
+
 class DevicePopup(Popup):
-    """搜索并选择附近 BLE 设备的弹窗。"""
+    """搜索并选择附近 BLE 设备的弹窗。
+
+    列表每 3 秒刷新一次（以前是 0.6 秒，设备会"忽闪忽闪"根本点不中）。
+    """
+
+    REFRESH_INTERVAL = 3.0
 
     def __init__(self, ble, on_pick, **kwargs):
         super(DevicePopup, self).__init__(**kwargs)
@@ -497,7 +554,7 @@ class DevicePopup(Popup):
         super(DevicePopup, self).on_open(*args)
         self._known = None
         self._ble.start_scan()
-        self._poll = Clock.schedule_interval(self._refresh, 0.6)
+        self._poll = Clock.schedule_interval(self._refresh, self.REFRESH_INTERVAL)
         self._refresh(0)
 
     def on_dismiss(self, *args):
@@ -506,6 +563,10 @@ class DevicePopup(Popup):
             self._poll.cancel()
             self._poll = None
         self._ble.stop_scan()
+
+    def open_favorites(self):
+        """打开「我的收藏」（扫描继续在后台跑，收藏里只列当前扫得到的设备）。"""
+        FavoritePopup(ble=self._ble, on_pick=self._pick).open()
 
     def _refresh(self, dt):
         title, detail, _connected = self._ble.status()
@@ -542,6 +603,105 @@ class DevicePopup(Popup):
         """重新发起一次扫描（授权后、或长时间搜不到时用）。"""
         self._known = None
         self._ble.start_scan()
+
+
+class FavoritePopup(Popup):
+    """「我的收藏」：只列出**当前扫描得到**的收藏设备，可取消收藏。
+
+    收藏是"连接成功过的设备自动归档"，所以列表里的设备一定是你连过的；
+    没在广播的设备不显示（连不上，显示了也没意义）。
+    """
+
+    def __init__(self, ble, on_pick, **kwargs):
+        super(FavoritePopup, self).__init__(**kwargs)
+        self._ble = ble
+        self._on_pick = on_pick
+        self._poll = None
+        self._known = None
+        self.refresh_list()
+
+    def on_open(self, *args):
+        super(FavoritePopup, self).on_open(*args)
+        self._known = None
+        self.refresh_list()
+        self._poll = Clock.schedule_interval(self.refresh_list, 3.0)
+
+    def on_dismiss(self, *args):
+        super(FavoritePopup, self).on_dismiss(*args)
+        if self._poll is not None:
+            self._poll.cancel()
+            self._poll = None
+
+    def refresh_list(self, *args):
+        app = App.get_running_app()
+        store = app.favorites
+        if store is None:
+            return
+        visible = dict((device['address'], device) for device in self._ble.devices())
+        rows = []
+        for item in store.items():
+            device = visible.get(item['address'])
+            if device is None:
+                continue        # 没扫描到就不显示
+            name = (device.get('name') or item.get('name') or '未命名设备').strip()
+            rows.append((item['address'], name, int(device.get('rssi') or 0)))
+
+        signature = tuple(row[0] for row in rows)
+        if signature == self._known:
+            return
+        self._known = signature
+
+        self.ids.fav_state.text = ('扫描到的收藏设备 %d 台（未扫描到的设备不显示）'
+                                   % len(rows) if rows else '扫描到的设备里暂无收藏')
+        box = self.ids.fav_list
+        box.clear_widgets()
+        if not rows:
+            # 一行一个固定高度标签（多行写在同一个标签里会被行高裁掉）
+            for text in ('还没有扫到收藏过的设备。',
+                         '先在设备列表里连接一次，连接成功的设备会自动进入收藏；',
+                         '设备在附近、正在搜索时才会显示在这里。'):
+                box.add_widget(PopupRow(text=text))
+            return
+        for address, name, rssi in rows:
+            box.add_widget(self._build_row(address, name, rssi))
+
+    def _build_row(self, address, name, rssi):
+        app = App.get_running_app()
+        row = BoxLayout(orientation='horizontal', size_hint_y=None,
+                        height=dp(60), spacing=dp(6))
+        device_row = DeviceRow()
+        device_row.size_hint_x = 1
+        device_row.text = '%s\nMAC %s   信号 %d dBm' % (name, address, rssi)
+        device_row.bind(on_release=lambda widget, addr=address: self._pick(addr))
+        row.add_widget(device_row)
+
+        # 取消收藏：只删这一台，别的收藏不受影响
+        # 用默认按钮底图 + 红色着色，保证按下去有可见的红色块
+        remove = Button(text='取消\n收藏', font_name=app.font_name,
+                        font_size=sp(11), size_hint=(None, 1), width=dp(62),
+                        background_color=COLOR_DANGER, color=(1, 1, 1, 1))
+        remove.bind(on_release=lambda widget, addr=address: self._remove(addr))
+        row.add_widget(remove)
+        return row
+
+    def _pick(self, address):
+        device = None
+        for item in self._ble.devices():
+            if item['address'] == address:
+                device = item
+                break
+        if device is None:
+            return
+        self.dismiss()
+        self._on_pick(device)
+
+    def _remove(self, address):
+        app = App.get_running_app()
+        if app.favorites is not None:
+            app.favorites.remove(address)
+            app.log_line('☆ 已取消收藏：%s' % address)
+        self._known = None
+        self.refresh_list()
 
 
 class ServicesPopup(Popup):
@@ -807,6 +967,7 @@ class CommandInputPopup(Popup):
         # 和「启动」「停止」一样：发送动作本身也要在显示屏上留痕
         app.log_line('→ 已发送 开发者（%d 字节）：%s'
                      % (len(hex_data) // 2, spaced_hex(hex_data)))
+        app.expect_return()
         self.state = '已发送 %s，等待写入完成…' % note
         if not app.ping_module():
             app.log_line('（AT 通道未就绪，本次没有做模块在线确认）')
@@ -1134,10 +1295,15 @@ class CtrlScreen(Screen):
         DevicePopup(ble=app.ble, on_pick=self._on_device_picked).open()
 
     def _on_device_picked(self, device):
-        App.get_running_app().ble.connect(device['address'])
+        app = App.get_running_app()
+        # 连接成功后自动归档到「我的收藏」（真正连上时才记，见 App._poll_ble）
+        app.pending_favorite = device
+        app.ble.connect(device['address'])
 
     def do_disconnect(self):
-        App.get_running_app().ble.disconnect()
+        app = App.get_running_app()
+        app.ble.disconnect()
+        app.note_manual_disconnect()
 
     def open_services_dialog(self):
         app = App.get_running_app()
@@ -1198,6 +1364,8 @@ class CtrlScreen(Screen):
             return
         app.log_line('→ 已发送 %s（%d 字节）：%s'
                      % (name, len(hex_data) // 2, spaced_hex(hex_data)))
+        # 等模块的回传命令包；一直没收到就明确写"0字节，未读取到有效信息"
+        app.expect_return()
         # 顺手向模块发一条 AT 查询：它的回复会以「← 收到 AT 回复」出现在显示屏上，
         # 用来确认"模块确实在线、蓝牙链路双向都通"
         if not app.ping_module():
@@ -1338,6 +1506,9 @@ class BleAssistantApp(App):
         self.ble = create_ble_manager()
         self.navy_gradient = gradient_texture(GRAD_NAVY_A, GRAD_NAVY_B)
         self.store = AccountStore(os.path.join(self.user_data_dir, 'accounts.db'))
+        self.favorites = FavoriteStore(
+            os.path.join(self.user_data_dir, 'favorites.json'))
+        self.pending_favorite = None
         self._parser = RxFrameParser()
         self._notify_subscribed = False
         self._at_subscribed = False
@@ -1346,6 +1517,12 @@ class BleAssistantApp(App):
         self._at_sinks = []
         self._config_runner = None
         self._poll = None
+        # 回传命令包：收到的包数 + "发出后等回传"的超时定时器
+        self._rx_packets = 0
+        self._return_timer = None
+        self._return_base = 0
+        # GATT 偶发报断开时的防抖计数
+        self._disconnect_streak = 0
 
         Window.bind(on_keyboard=self._on_keyboard)
         Builder.load_file(KV_FILE)
@@ -1424,6 +1601,16 @@ class BleAssistantApp(App):
     def _poll_ble(self, _dt):
         ble = self.ble
         title, detail, connected = ble.status()
+        if connected:
+            self._disconnect_streak = 0
+        elif self.connected:
+            # 防抖：GATT 偶尔会先报一次 disconnected（下一轮又回到已连接），
+            # 界面立刻改成"已断开"就会出现"显示断开了、其实还连着"。
+            # 连续两轮（约 0.8 秒）都报断开才真的认为断开。
+            self._disconnect_streak += 1
+            if self._disconnect_streak < 2:
+                connected = True
+                title, detail = self.status_text, self.status_detail
         if title != self.status_text:
             self.status_text = title
         if detail != self.status_detail:
@@ -1431,10 +1618,32 @@ class BleAssistantApp(App):
         if connected != self.connected:
             self.connected = connected
             self.log_line('● 已连接设备' if connected else '○ 已断开连接')
+            if connected:
+                self._remember_favorite()
+            else:
+                self.pending_favorite = None
 
         self._keep_notify(ble, connected)
         self._drain_at(ble)
         self._drain_incoming(ble)
+
+    def _remember_favorite(self):
+        """真正连上之后，把设备归档进「我的收藏」。"""
+        device = self.pending_favorite
+        self.pending_favorite = None
+        if not device or self.favorites is None:
+            return
+        if self.favorites.add(device):
+            name = (device.get('name') or device.get('address') or '').strip()
+            self.log_line('★ 已加入我的收藏：%s' % name)
+
+    def note_manual_disconnect(self):
+        """用户主动点「断开连接」：不等防抖，界面立刻显示已断开。"""
+        self.pending_favorite = None
+        self._disconnect_streak = 0
+        if self.connected:
+            self.connected = False
+            self.log_line('○ 已断开连接')
 
     # ------------------------------------------------------------------
     # AT 通道：始终有人读，收到就上显示屏
@@ -1523,6 +1732,11 @@ class BleAssistantApp(App):
             self.log_line('模块配置锁定没有收到 OK（模块可能不支持 AT 指令，不影响收发）')
 
     def _drain_incoming(self, ble):
+        """读模块的回传命令包（通知通道 6E400003）。
+
+        不管它是不是约定的 AA55 帧格式，**收到什么就在显示屏上显示什么**：
+        以前只把能拼成帧的字节显示出来，模块用自定格式回传时就会被静默丢掉。
+        """
         chunks = ble.pop_received()
         if not chunks:
             return
@@ -1532,8 +1746,30 @@ class BleAssistantApp(App):
                 data.extend(bytearray.fromhex(str(chunk)))
             except ValueError:
                 Logger.warning('BleAssistant: 收到非十六进制回传数据，已跳过')
-        for cmd, payload in self._parser.feed(data):
-            self._on_reply(cmd, payload)
+        if not data:
+            return
+        self._rx_packets += 1
+
+        raw = bytes(data)
+        frames = self._parser.feed(data)
+        if frames:
+            for cmd, payload in frames:
+                self._on_reply(cmd, payload)
+            return
+        # 不是约定帧格式：按原始字节显示（字节数 + 内容）
+        self.log_line('← 回传命令包（%d 字节）：%s'
+                      % (len(raw), self.describe_bytes(raw)))
+
+    @staticmethod
+    def describe_bytes(raw):
+        """把一段回传字节转成显示屏上的"内容"：能当文本读就读文本，否则给十六进制。"""
+        try:
+            text = raw.decode('utf-8')
+        except Exception:                                       # noqa: BLE001
+            text = ''
+        if text.strip() and all(ch.isprintable() or ch in '\r\n\t' for ch in text):
+            return ' '.join(text.split())
+        return spaced_hex(to_hex(raw))
 
     def _on_reply(self, cmd, payload):
         """设备 → 手机：统一写进显示屏；「开发者」弹窗开着时同时显示在弹窗里。"""
@@ -1541,7 +1777,8 @@ class BleAssistantApp(App):
         raw_hex = to_hex(raw)
         text = decode_text(payload)
         shown = text if text.strip() else '（非文本载荷，原始 %s）' % (raw_hex or '空')
-        self.log_line('← 收到 0x%02X（%d 字节）：%s' % (cmd, len(raw), shown))
+        self.log_line('← 回传命令包 0x%02X（%d 字节）：%s'
+                      % (cmd, len(raw), shown))
         Logger.info('BleAssistant: 收到回传 cmd=0x%02X 载荷=%r 原始=%s', cmd, text, raw_hex)
         try:
             popup = getattr(self.screen('ctrl'), '_cmd_popup', None)
@@ -1549,6 +1786,22 @@ class BleAssistantApp(App):
             popup = None
         if popup is not None:
             popup.add_reply(cmd, text, raw_hex)
+
+    # ------------------------------------------------------------------
+    # 回传命令包：发出后等一会儿，没收到就明确写"0字节"
+    # ------------------------------------------------------------------
+    def expect_return(self, delay=RETURN_TIMEOUT):
+        """发完命令后开一个等待窗口：窗口内一条回传都没收到，就写"0字节，未读取到有效信息"。"""
+        if self._return_timer is not None:
+            self._return_timer.cancel()
+            self._return_timer = None
+        self._return_base = self._rx_packets
+        self._return_timer = Clock.schedule_once(self._check_return, delay)
+
+    def _check_return(self, _dt):
+        self._return_timer = None
+        if self._rx_packets <= self._return_base:
+            self.log_line('← 回传命令包：0字节，未读取到有效信息')
 
     # ------------------------------------------------------------------
     # 模块固件自己的 AT 回复 → 显示屏
